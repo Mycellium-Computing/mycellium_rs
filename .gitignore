@@ -1,0 +1,15 @@
+/target
+
+Cargo.lock
+
+# IDE and OS specific files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Other common temporary or log files
+*.log
+*.bak
+temp/
+tmp/

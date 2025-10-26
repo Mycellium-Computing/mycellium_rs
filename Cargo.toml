@@ -1,0 +1,9 @@
+[package]
+name = "modular_architecture"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3"
+
+[dependencies]
+dust_dds = "0.13.0"
+primitives = { path = "./primitive_derives" }
