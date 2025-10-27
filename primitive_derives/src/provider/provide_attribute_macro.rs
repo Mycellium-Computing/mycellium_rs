@@ -1,5 +1,5 @@
 use proc_macro::TokenStream;
-use quote::{format_ident, ToTokens};
+use quote::{format_ident, quote, ToTokens};
 use syn::parse::Parse;
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
@@ -20,12 +20,12 @@ impl Parse for Functionality {
         syn::parenthesized!(content in input);
 
         let name_lit: syn::LitStr = content.parse()?;
-        content.parse::<syn::Token![,]>()?;
+        content.parse::<Token![,]>()?;
         let input_type: Type = content.parse()?;
-        content.parse::<syn::Token![,]>()?;
+        content.parse::<Token![,]>()?;
         let output_type: Type = content.parse()?;
 
-        let name = syn::Ident::new(&name_lit.value(), name_lit.span());
+        let name = Ident::new(&name_lit.value(), name_lit.span());
 
         Ok(Functionality {
             name,
@@ -53,26 +53,118 @@ impl Parse for Functionalities {
     }
 }
 
-// Tokenize the intermidiate representation
+// Tokenize the intermediate representation
 
-impl ToTokens for Functionality {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let name = &self.name;
-        let input_type = &self.input_type;
-        let output_type = &self.output_type;
+fn get_functionality_trait_tokens(functionality: &Functionality, tokens: &mut proc_macro2::TokenStream) {
+    let name = &functionality.name;
+    let input_type = &functionality.input_type;
+    let output_type = &functionality.output_type;
 
-        let func_tokens = quote::quote! {
-            fn #name(&self, input: #input_type) -> #output_type;
-        };
+    let func_tokens = quote::quote! {
+        fn #name(&self, input: #input_type) -> #output_type;
+    };
 
-        tokens.extend(func_tokens);
+    tokens.extend(func_tokens);
+}
+
+fn get_functionalities_trait_tokens(functionalities: &Functionalities, tokens: &mut proc_macro2::TokenStream) {
+    for functionality in &functionalities.functionalities {
+        get_functionality_trait_tokens(functionality, tokens);
     }
 }
 
-impl ToTokens for Functionalities {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        for functionality in &self.functionalities {
-            functionality.to_tokens(tokens);
+
+fn get_provider_trait_tokens(struct_name: &Ident, functionalities: &Functionalities) -> proc_macro2::TokenStream {
+    let provider_trait_name = format_ident!("{}ProviderTrait", struct_name);
+
+    let mut trait_tokens = proc_macro2::TokenStream::new();
+    get_functionalities_trait_tokens(functionalities, &mut trait_tokens);
+
+    quote! {
+        trait #provider_trait_name {
+            #trait_tokens
+        }
+    }
+}
+
+fn get_functionality_message_tokens(functionality: &Functionality) -> proc_macro2::TokenStream {
+    let name = &functionality.name.to_string();
+    let input_type = &functionality.input_type.to_token_stream().to_string();
+    let output_type = &functionality.output_type.to_token_stream().to_string();
+
+    quote! {
+        ProvidedFunctionality {
+            name: #name.to_string(),
+            input_type: #input_type.to_string(),
+            output_type: #output_type.to_string(),
+        }
+    }
+}
+
+fn get_functionalities_message_tokens(provider_name: &Ident, functionalities: &Functionalities, tokens: &mut proc_macro2::TokenStream) {
+    let functionalities_messages: Vec<proc_macro2::TokenStream> = functionalities.functionalities.iter().map(|functionality| {
+        get_functionality_message_tokens(functionality)
+    }).collect();
+
+    let provider_name = provider_name.to_string();
+
+    tokens.extend(quote! {
+        ProviderMessage {
+            provider_name: #provider_name.to_string(),
+            functionalities: vec![
+                #(#functionalities_messages),*
+            ],
+        }
+    });
+}
+
+fn get_functionality_match_tokens(functionality: &Functionality) -> proc_macro2::TokenStream {
+    let name = &functionality.name.to_string();
+    let input_type = &functionality.input_type;
+    quote! {
+        #name => {
+            let input = *input.downcast::<#input_type>().unwrap();
+            Box::new(self.face_detection(input))
+        }
+    }
+}
+
+fn get_functionalities_match_tokens(functionalities: &Functionalities, tokens: &mut proc_macro2::TokenStream) {
+    let functionalities_match_branches = functionalities.functionalities.iter().map(|functionality| {
+        get_functionality_match_tokens(functionality)
+    });
+
+    tokens.extend(quote! {
+        match method {
+            #(#functionalities_match_branches,)*
+            _ => panic!("Unknown method"),
+        }
+    })
+}
+
+fn get_provider_impl_tokens(
+    provider_name: &Ident,
+    provider_trait_name: &Ident,
+    functionalities: &Functionalities,
+) -> proc_macro2::TokenStream {
+    let mut message_tokens = proc_macro2::TokenStream::new();
+    get_functionalities_message_tokens(provider_name, functionalities, &mut message_tokens);
+
+    let mut execute_tokens = proc_macro2::TokenStream::new();
+    get_functionalities_match_tokens(functionalities, &mut execute_tokens);
+
+    quote::quote! {
+        impl<T> ProviderTrait for T
+        where
+            T: #provider_trait_name,
+        {
+            fn get_functionalities() -> ProviderMessage {
+                #message_tokens
+            }
+
+            fn execute(&self, method: &str, input: Box<dyn Any>) -> Box<dyn Any> {
+                #execute_tokens
+            }
         }
     }
 }
@@ -83,16 +175,15 @@ pub fn apply_provide_attribute_macro(
 ) -> TokenStream {
     let struct_name = &struct_input.ident;
     let provider_trait_name = format_ident!("{}ProviderTrait", struct_name);
-
-    let mut trait_tokens = proc_macro2::TokenStream::new();
-    functionalities.to_tokens(&mut trait_tokens);
+    let provider_trait = get_provider_trait_tokens(struct_name, functionalities);
+    let provider_impl = get_provider_impl_tokens(&struct_name, &provider_trait_name, functionalities);
 
     let expanded = quote::quote! {
         #struct_input
 
-        trait #provider_trait_name {
-            #trait_tokens
-        }
+        #provider_impl
+
+        #provider_trait
     };
 
     TokenStream::from(expanded)
