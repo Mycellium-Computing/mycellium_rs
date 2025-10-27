@@ -93,7 +93,7 @@ fn get_functionality_message_tokens(functionality: &Functionality) -> proc_macro
     let output_type = &functionality.output_type.to_token_stream().to_string();
 
     quote! {
-        ProvidedFunctionality {
+        modular_architecture::core::application::messages::ProvidedFunctionality {
             name: #name.to_string(),
             input_type: #input_type.to_string(),
             output_type: #output_type.to_string(),
@@ -109,7 +109,7 @@ fn get_functionalities_message_tokens(provider_name: &Ident, functionalities: &F
     let provider_name = provider_name.to_string();
 
     tokens.extend(quote! {
-        ProviderMessage {
+        modular_architecture::core::application::messages::ProviderMessage {
             provider_name: #provider_name.to_string(),
             functionalities: vec![
                 #(#functionalities_messages),*
@@ -119,12 +119,13 @@ fn get_functionalities_message_tokens(provider_name: &Ident, functionalities: &F
 }
 
 fn get_functionality_match_tokens(functionality: &Functionality) -> proc_macro2::TokenStream {
-    let name = &functionality.name.to_string();
+    let name_str = &functionality.name.to_string();
+    let name_ident = &functionality.name;
     let input_type = &functionality.input_type;
     quote! {
-        #name => {
+        #name_str => {
             let input = *input.downcast::<#input_type>().unwrap();
-            Box::new(self.face_detection(input))
+            Box::new(self.#name_ident(input))
         }
     }
 }
@@ -144,7 +145,7 @@ fn get_functionalities_match_tokens(functionalities: &Functionalities, tokens: &
 
 fn get_provider_impl_tokens(
     provider_name: &Ident,
-    provider_trait_name: &Ident,
+    _provider_trait_name: &Ident,
     functionalities: &Functionalities,
 ) -> proc_macro2::TokenStream {
     let mut message_tokens = proc_macro2::TokenStream::new();
@@ -154,15 +155,12 @@ fn get_provider_impl_tokens(
     get_functionalities_match_tokens(functionalities, &mut execute_tokens);
 
     quote::quote! {
-        impl<T> ProviderTrait for T
-        where
-            T: #provider_trait_name,
-        {
-            fn get_functionalities() -> ProviderMessage {
+        impl modular_architecture::core::application::provider::ProviderTrait for #provider_name {
+            fn get_functionalities() -> modular_architecture::core::application::messages::ProviderMessage {
                 #message_tokens
             }
 
-            fn execute(&self, method: &str, input: Box<dyn Any>) -> Box<dyn Any> {
+            fn execute(&self, method: &str, input: Box<dyn std::any::Any>) -> Box<dyn std::any::Any> {
                 #execute_tokens
             }
         }

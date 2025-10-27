@@ -1,9 +1,6 @@
-[package]
-name = "modular_architecture"
-version = "0.1.0"
-edition = "2024"
-license = "MIT"
-
-[dependencies]
-dust_dds = "0.13.0"
-primitives = { path = "./primitive_derives" }
+[workspace]
+members = [
+    "core_impl",
+    "macros",
+    "usage_examples",
+]

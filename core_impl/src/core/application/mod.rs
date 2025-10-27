@@ -11,8 +11,6 @@ use dust_dds::std_runtime::StdRuntime;
 use dust_dds::topic_definition::topic_description::TopicDescription;
 use crate::core::application::messages::{ConsumerRequest, ProviderMessage};
 use crate::core::application::provider::ProviderTrait;
-use crate::VisualObjectDetection;
-
 
 pub struct Application {
     domain_id: u32,
