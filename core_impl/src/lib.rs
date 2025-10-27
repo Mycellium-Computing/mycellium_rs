@@ -2,6 +2,6 @@
 
 pub mod core;
 
-pub use modular_architecture_macros::*;
+pub use mycellium_computing_macros::*;
 
-extern crate self as modular_architecture;
+extern crate self as mycellium_computing;

@@ -93,7 +93,7 @@ fn get_functionality_message_tokens(functionality: &Functionality) -> proc_macro
     let output_type = &functionality.output_type.to_token_stream().to_string();
 
     quote! {
-        modular_architecture::core::application::messages::ProvidedFunctionality {
+        mycellium_computing::core::application::messages::ProvidedFunctionality {
             name: #name.to_string(),
             input_type: #input_type.to_string(),
             output_type: #output_type.to_string(),
@@ -109,7 +109,7 @@ fn get_functionalities_message_tokens(provider_name: &Ident, functionalities: &F
     let provider_name = provider_name.to_string();
 
     tokens.extend(quote! {
-        modular_architecture::core::application::messages::ProviderMessage {
+        mycellium_computing::core::application::messages::ProviderMessage {
             provider_name: #provider_name.to_string(),
             functionalities: vec![
                 #(#functionalities_messages),*
@@ -155,8 +155,8 @@ fn get_provider_impl_tokens(
     get_functionalities_match_tokens(functionalities, &mut execute_tokens);
 
     quote::quote! {
-        impl modular_architecture::core::application::provider::ProviderTrait for #provider_name {
-            fn get_functionalities() -> modular_architecture::core::application::messages::ProviderMessage {
+        impl mycellium_computing::core::application::provider::ProviderTrait for #provider_name {
+            fn get_functionalities() -> mycellium_computing::core::application::messages::ProviderMessage {
                 #message_tokens
             }
 

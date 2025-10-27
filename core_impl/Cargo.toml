@@ -1,8 +1,8 @@
 [package]
-name = "modular_architecture"
+name = "mycellium_computing"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 dust_dds = "0.13.0"
-modular_architecture_macros = { path = "../macros" }
+mycellium_computing_macros = { path = "../macros" }

@@ -1,9 +1,8 @@
 use dust_dds::infrastructure::type_support::DdsType;
-use modular_architecture::{
+use mycellium_computing::{
     core::application::Application,
     provides,
 };
-use modular_architecture::core::application::provider::ProviderTrait;
 
 #[derive(DdsType)]
 struct Image {

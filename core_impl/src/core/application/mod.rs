@@ -13,7 +13,6 @@ use crate::core::application::messages::{ConsumerRequest, ProviderMessage};
 use crate::core::application::provider::ProviderTrait;
 
 pub struct Application {
-    domain_id: u32,
     name: String,
     participant: DomainParticipant<StdRuntime>,
     provider_registration_topic: TopicDescription<StdRuntime>,
@@ -31,8 +30,9 @@ impl Application {
         self.providers.push(Box::new(provider));
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&self) {
         println!("It works!");
+        println!("The following providers are registered: {:?}", self.providers);
     }
 
     pub fn new(domain_id: u32, name: &str) -> Self {
@@ -59,7 +59,6 @@ impl Application {
         ).unwrap();
 
         Application {
-            domain_id,
             name: name.to_string(),
             participant,
             provider_registration_topic,

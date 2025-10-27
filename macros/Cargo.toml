@@ -1,5 +1,5 @@
 [package]
-name = "modular_architecture_macros"
+name = "mycellium_computing_macros"
 version = "0.1.0"
 edition = "2024"
 
