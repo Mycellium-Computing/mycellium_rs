@@ -1,7 +1,6 @@
 pub mod messages;
 pub mod provider;
 
-use std::any::Any;
 use dust_dds::domain::domain_participant::DomainParticipant;
 use dust_dds::domain::domain_participant_factory::DomainParticipantFactory;
 use dust_dds::infrastructure::qos::QosKind;
@@ -18,7 +17,7 @@ pub struct Application {
     provider_registration_topic: TopicDescription<StdRuntime>,
     customer_request_topic: TopicDescription<StdRuntime>,
 
-    providers: Vec<Box<dyn Any>>,
+    providers: Vec<Box<dyn ProviderTrait>>,
 }
 
 impl Application {
@@ -31,8 +30,7 @@ impl Application {
     }
 
     pub fn run(&self) {
-        println!("It works!");
-        println!("The following providers are registered: {:?}", self.providers);
+        self.setup_providers();
     }
 
     pub fn new(domain_id: u32, name: &str) -> Self {
@@ -64,6 +62,23 @@ impl Application {
             provider_registration_topic,
             customer_request_topic: consumer_request_topic,
             providers: Vec::new(),
+        }
+    }
+
+    // SetUp providers and threads
+
+    fn setup_providers(&self) {
+        for provider in &self.providers {
+            let publisher = self.participant
+                .create_publisher(QosKind::Default, NO_LISTENER, NO_STATUS)
+                .unwrap();
+
+            let writer = publisher
+                .create_datawriter::<ProviderMessage>(&self.provider_registration_topic, QosKind::Default, NO_LISTENER, NO_STATUS)
+                .unwrap();
+
+            writer.write(&provider.get_functionalities(), None).unwrap();
+            println!("Registered provider: {}", provider.get_functionalities().provider_name);
         }
     }
 }

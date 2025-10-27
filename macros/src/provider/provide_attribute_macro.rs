@@ -156,7 +156,7 @@ fn get_provider_impl_tokens(
 
     quote::quote! {
         impl mycellium_computing::core::application::provider::ProviderTrait for #provider_name {
-            fn get_functionalities() -> mycellium_computing::core::application::messages::ProviderMessage {
+            fn get_functionalities(&self) -> mycellium_computing::core::application::messages::ProviderMessage {
                 #message_tokens
             }
 
