@@ -53,5 +53,5 @@ fn main() {
     app.register_provider::<VisualObjectDetection>();
     app.register_provider::<Chatbot>();
 
-    app.run();
+    app.ready();
 }
