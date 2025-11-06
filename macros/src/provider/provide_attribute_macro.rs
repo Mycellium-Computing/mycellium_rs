@@ -3,7 +3,7 @@ use quote::{format_ident, quote, ToTokens};
 use syn::parse::Parse;
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
-use syn::{Token, Type, Ident};
+use syn::{Token, Type, Ident, ItemStruct};
 
 
 // Intermediate representation
@@ -61,7 +61,7 @@ fn get_functionality_trait_tokens(functionality: &Functionality, tokens: &mut pr
     let output_type = &functionality.output_type;
 
     let func_tokens = quote::quote! {
-        fn #name(&self, input: #input_type) -> #output_type;
+        async fn #name(&self, input: #input_type) -> #output_type;
     };
 
     tokens.extend(func_tokens);
@@ -125,7 +125,103 @@ fn get_functionality_match_tokens(functionality: &Functionality) -> proc_macro2:
     quote! {
         #name_str => {
             let input = *input.downcast::<#input_type>().unwrap();
-            Box::new(self.#name_ident(input))
+            Box::new(self.#name_ident(input).await)
+        }
+    }
+}
+
+fn get_functionality_channel_tokens(provider_name: &Ident, functionality: &Functionality) -> proc_macro2::TokenStream {
+    let topic_base_name = format_ident!("{}_{}", provider_name.to_string(), functionality.name.to_string()).to_string();
+    let topic_req_name = format!("{}_Req", topic_base_name);
+    let topic_res_name = format!("{}_Res", topic_base_name);
+
+    println!("Generating topics for service {}", topic_base_name);
+
+    let name_ident = &functionality.name;
+    let input_type = &functionality.input_type;
+    let output_type = &functionality.output_type;
+
+    let topic_req_input_type_name = input_type.to_token_stream().to_string();
+    let topic_res_output_type_name = output_type.to_token_stream().to_string();
+
+    let topic_tokens = quote! {
+        let request_topic = participant.create_topic::<#input_type>(
+            #topic_req_name,
+            #topic_req_input_type_name,
+            dust_dds::infrastructure::qos::QosKind::Default,
+            dust_dds::listener::NO_LISTENER,
+            dust_dds::infrastructure::status::NO_STATUS,
+        )
+            .await
+            .unwrap();
+
+
+        let response_topic = participant.create_topic::<#output_type>(
+            #topic_res_name,
+            #topic_res_output_type_name,
+            dust_dds::infrastructure::qos::QosKind::Default,
+            dust_dds::listener::NO_LISTENER,
+            dust_dds::infrastructure::status::NO_STATUS,
+        )
+            .await
+            .unwrap();
+
+    };
+
+    let reader_tokens = quote! {
+        let reader = subscriber.create_datareader::<#input_type>(
+            &request_topic,
+            dust_dds::infrastructure::qos::QosKind::Default,
+            dust_dds::listener::NO_LISTENER,
+            dust_dds::infrastructure::status::NO_STATUS
+        )
+            .await
+            .unwrap();
+    };
+
+    let writer_tokens = quote! {
+        let writer = publisher.create_datawriter::<#output_type>(
+            &response_topic,
+            dust_dds::infrastructure::qos::QosKind::Default,
+            dust_dds::listener::NO_LISTENER,
+            dust_dds::infrastructure::status::NO_STATUS
+        )
+            .await
+            .unwrap();
+    };
+
+    let execution_tokens = quote! {
+        let mut interval = tokio::time::interval(tick_duration);
+        loop {
+            let samples = reader.take(
+                1,
+                dust_dds::infrastructure::sample_info::ANY_SAMPLE_STATE,
+                dust_dds::infrastructure::sample_info::ANY_VIEW_STATE,
+                dust_dds::infrastructure::sample_info::ANY_INSTANCE_STATE
+            ).await;
+
+            if let Ok(requests) = samples {
+                let request = requests[0].data().unwrap();
+                let response = self.#name_ident(request).await;
+
+                writer.write(&response, None).await.unwrap();
+            }
+
+            interval.tick().await;
+        }
+    };
+
+    let name_str = &functionality.name.to_string();
+
+    quote! {
+        #name_str => {
+            #topic_tokens
+
+            #reader_tokens
+
+            #writer_tokens
+
+            #execution_tokens
         }
     }
 }
@@ -143,9 +239,21 @@ fn get_functionalities_match_tokens(functionalities: &Functionalities, tokens: &
     })
 }
 
+fn get_functionalities_channel_tokens(provider_name: &Ident, functionalities: &Functionalities, tokens: &mut proc_macro2::TokenStream) {
+    let functionalities_channel_branches = functionalities.functionalities.iter().map(|functionality| {
+        get_functionality_channel_tokens(&provider_name, functionality)
+    });
+
+    tokens.extend(quote! {
+        match functionality_name.as_str() {
+            #(#functionalities_channel_branches,)*
+            _ => panic!("Unknown functionality"),
+        }
+    })
+}
+
 fn get_provider_impl_tokens(
     provider_name: &Ident,
-    _provider_trait_name: &Ident,
     functionalities: &Functionalities,
 ) -> proc_macro2::TokenStream {
     let mut message_tokens = proc_macro2::TokenStream::new();
@@ -154,14 +262,24 @@ fn get_provider_impl_tokens(
     let mut execute_tokens = proc_macro2::TokenStream::new();
     get_functionalities_match_tokens(functionalities, &mut execute_tokens);
 
+    let mut channel_tokens = proc_macro2::TokenStream::new();
+    get_functionalities_channel_tokens(provider_name, functionalities, &mut channel_tokens);
+
     quote::quote! {
         impl mycellium_computing::core::application::provider::ProviderTrait for #provider_name {
             fn get_functionalities(&self) -> mycellium_computing::core::application::messages::ProviderMessage {
                 #message_tokens
             }
 
-            fn execute(&self, method: &str, input: Box<dyn std::any::Any>) -> Box<dyn std::any::Any> {
-                #execute_tokens
+            fn run_executor(
+                &self,
+                tick_duration: std::time::Duration,
+                functionality_name: String,
+                participant: &dust_dds::dds_async::domain_participant::DomainParticipantAsync<dust_dds::std_runtime::StdRuntime>,
+                publisher: &dust_dds::dds_async::publisher::PublisherAsync<dust_dds::std_runtime::StdRuntime>,
+                subscriber: &dust_dds::dds_async::subscriber::SubscriberAsync<dust_dds::std_runtime::StdRuntime>
+            ) -> impl Future<Output = ()> + Send {
+                async move { #channel_tokens }
             }
         }
     }
@@ -169,12 +287,11 @@ fn get_provider_impl_tokens(
 
 pub fn apply_provide_attribute_macro(
     functionalities: &Functionalities,
-    struct_input: &syn::ItemStruct,
+    struct_input: &ItemStruct,
 ) -> TokenStream {
     let struct_name = &struct_input.ident;
-    let provider_trait_name = format_ident!("{}ProviderTrait", struct_name);
     let provider_trait = get_provider_trait_tokens(struct_name, functionalities);
-    let provider_impl = get_provider_impl_tokens(&struct_name, &provider_trait_name, functionalities);
+    let provider_impl = get_provider_impl_tokens(&struct_name, functionalities);
 
     let expanded = quote::quote! {
         #struct_input

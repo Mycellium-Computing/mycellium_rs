@@ -1,43 +1,111 @@
 pub mod messages;
 pub mod provider;
 
-use dust_dds::domain::domain_participant::DomainParticipant;
-use dust_dds::domain::domain_participant_factory::DomainParticipantFactory;
-use dust_dds::infrastructure::qos::QosKind;
+use std::sync::Arc;
+use std::time::Duration;
+use dust_dds::dds_async::data_reader::DataReaderAsync;
+use dust_dds::dds_async::data_writer::DataWriterAsync;
+use dust_dds::dds_async::domain_participant::DomainParticipantAsync;
+use dust_dds::dds_async::domain_participant_factory::DomainParticipantFactoryAsync;
+use dust_dds::dds_async::publisher::PublisherAsync;
+use dust_dds::dds_async::subscriber::SubscriberAsync;
+use dust_dds::infrastructure::qos::{QosKind};
+use dust_dds::infrastructure::sample_info::{ANY_INSTANCE_STATE, ANY_SAMPLE_STATE, ANY_VIEW_STATE};
 use dust_dds::infrastructure::status::NO_STATUS;
 use dust_dds::listener::NO_LISTENER;
 use dust_dds::std_runtime::StdRuntime;
-use dust_dds::topic_definition::topic_description::TopicDescription;
-use crate::core::application::messages::{ConsumerRequest, ProviderMessage};
+use crate::core::application::messages::{ConsumerDiscovery, ProviderMessage};
 use crate::core::application::provider::ProviderTrait;
 
 pub struct Application {
     name: String,
-    participant: DomainParticipant<StdRuntime>,
-    provider_registration_topic: TopicDescription<StdRuntime>,
-    customer_request_topic: TopicDescription<StdRuntime>,
-
-    providers: Vec<Box<dyn ProviderTrait>>,
+    tick_duration: Duration,
+    participant: Arc<DomainParticipantAsync<StdRuntime>>,
+    publisher: Arc<PublisherAsync<StdRuntime>>,
+    subscriber: Arc<SubscriberAsync<StdRuntime>>,
+    consumer_request_reader: Arc<DataReaderAsync<StdRuntime, ConsumerDiscovery>>,
+    provider_registration_writer: Arc<DataWriterAsync<StdRuntime, ProviderMessage>>,
 }
 
 impl Application {
-    pub fn register_provider<T>(&mut self)
+    pub async fn run_forever(&self) {
+        println!("{} is waiting forever", self.name);
+        loop {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+        }
+    }
+
+
+    pub async fn register_provider<T>(&mut self)
     where
-        T: ProviderTrait + Default + 'static,
+        T: ProviderTrait + Default + Send + Sync + 'static,
     {
-        let provider = T::default();
-        self.providers.push(Box::new(provider));
+        let provider = Arc::new(T::default());
+
+        // Registerer task
+        tokio::spawn({
+            let p = Arc::clone(&provider);
+            let writer = Arc::clone(&self.provider_registration_writer);
+            let reader = Arc::clone(&self.consumer_request_reader);
+            let mut interval = tokio::time::interval(self.tick_duration);
+            async move {
+                writer.write(&p.get_functionalities(), None).await.unwrap();
+                println!("Registered provider: {}", p.get_functionalities().provider_name);
+
+                loop {
+                    let samples = reader.take(
+                        1, ANY_SAMPLE_STATE, ANY_VIEW_STATE, ANY_INSTANCE_STATE
+                    ).await;
+
+                    if let Ok(_) = samples {
+                        writer.write(&p.get_functionalities(), None).await.unwrap();
+                    }
+
+                    interval.tick().await;
+                }
+            }
+        });
+
+        for functionality in provider.get_functionalities().functionalities {
+            tokio::spawn({
+                let p = Arc::clone(&provider);
+                let participant = Arc::clone(&self.participant);
+                let publisher = Arc::clone(&self.publisher);
+                let subscriber = Arc::clone(&self.subscriber);
+                let tick_duration = self.tick_duration.clone();
+
+                async move {
+                    p.run_executor(
+                        tick_duration,
+                        functionality.name,
+                        &participant,
+                        &publisher,
+                        &subscriber
+                    ).await
+                }
+            });
+        }
+
+        // Processing direct messages
+        tokio::spawn({
+            let p = Arc::clone(&provider);
+            let mut interval = tokio::time::interval(self.tick_duration);
+            async move {
+                loop {
+                    // Check for the consumer discovery messages and if
+                    p.get_functionalities();
+                    interval.tick().await;
+                }
+            }
+        });
     }
 
-    pub fn run(&self) {
-        self.setup_providers();
-    }
-
-    pub fn new(domain_id: u32, name: &str) -> Self {
-        let participant_factory = DomainParticipantFactory::get_instance();
+    pub async fn new(domain_id: u32, name: &str, tick_duration: Duration) -> Self {
+        let participant_factory = DomainParticipantFactoryAsync::get_instance();
 
         let participant = participant_factory
             .create_participant(domain_id as i32, QosKind::Default, NO_LISTENER, NO_STATUS)
+            .await
             .unwrap();
 
         let provider_registration_topic = participant.create_topic::<ProviderMessage>(
@@ -46,39 +114,48 @@ impl Application {
             QosKind::Default,
             NO_LISTENER,
             NO_STATUS,
-        ).unwrap();
+        )
+            .await
+            .unwrap();
 
-        let consumer_request_topic = participant.create_topic::<ConsumerRequest>(
-            "ConsumerRequest",
-            "ConsumerRequest",
+        let consumer_request_topic = participant.create_topic::<ConsumerDiscovery>(
+            "ConsumerDiscovery",
+            "ConsumerDiscovery",
             QosKind::Default,
             NO_LISTENER,
             NO_STATUS,
-        ).unwrap();
+        )
+            .await
+            .unwrap();
+
+        let publisher = participant
+            .create_publisher(QosKind::Default, NO_LISTENER, NO_STATUS)
+            .await
+            .unwrap();
+
+        let subscriber = participant
+            .create_subscriber(QosKind::Default, NO_LISTENER, NO_STATUS)
+            .await
+            .unwrap();
+
+        let consumer_request_reader = subscriber
+            .create_datareader::<ConsumerDiscovery>(&consumer_request_topic, QosKind::Default, NO_LISTENER, NO_STATUS)
+            .await
+            .unwrap();
+
+        let provider_registration_writer = publisher
+            .create_datawriter::<ProviderMessage>(&provider_registration_topic, QosKind::Default, NO_LISTENER, NO_STATUS)
+            .await
+            .unwrap();
 
         Application {
             name: name.to_string(),
-            participant,
-            provider_registration_topic,
-            customer_request_topic: consumer_request_topic,
-            providers: Vec::new(),
-        }
-    }
-
-    // SetUp providers and threads
-
-    fn setup_providers(&self) {
-        for provider in &self.providers {
-            let publisher = self.participant
-                .create_publisher(QosKind::Default, NO_LISTENER, NO_STATUS)
-                .unwrap();
-
-            let writer = publisher
-                .create_datawriter::<ProviderMessage>(&self.provider_registration_topic, QosKind::Default, NO_LISTENER, NO_STATUS)
-                .unwrap();
-
-            writer.write(&provider.get_functionalities(), None).unwrap();
-            println!("Registered provider: {}", provider.get_functionalities().provider_name);
+            tick_duration,
+            participant: Arc::new(participant),
+            publisher: Arc::new(publisher),
+            subscriber: Arc::new(subscriber),
+            consumer_request_reader: Arc::new(consumer_request_reader),
+            provider_registration_writer: Arc::new(provider_registration_writer),
         }
     }
 }
