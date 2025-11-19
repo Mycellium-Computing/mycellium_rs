@@ -1,5 +1,6 @@
 pub mod messages;
 pub mod provider;
+pub mod consumer;
 
 use std::sync::Arc;
 use std::time::Duration;

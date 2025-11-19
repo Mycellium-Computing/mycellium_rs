@@ -1,60 +1,9 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote, ToTokens};
-use syn::parse::Parse;
-use syn::punctuated::Punctuated;
-use syn::token::Comma;
-use syn::{Token, Type, Ident, ItemStruct};
-
-
-// Intermediate representation
-
-pub struct Functionality {
-    name: Ident,
-    input_type: Type,
-    output_type: Type,
-}
-
-impl Parse for Functionality {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let content;
-        syn::parenthesized!(content in input);
-
-        let name_lit: syn::LitStr = content.parse()?;
-        content.parse::<Token![,]>()?;
-        let input_type: Type = content.parse()?;
-        content.parse::<Token![,]>()?;
-        let output_type: Type = content.parse()?;
-
-        let name = Ident::new(&name_lit.value(), name_lit.span());
-
-        Ok(Functionality {
-            name,
-            input_type,
-            output_type,
-        })
-    }
-}
-
-pub struct Functionalities {
-    functionalities: Vec<Functionality>
-}
-
-impl Parse for Functionalities {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let content;
-        syn::bracketed!(content in input);
-
-        let functionalities_parsed: Punctuated<Functionality, Comma> =
-            content.parse_terminated(Functionality::parse, Token![,])?;
-
-        let functionalities = functionalities_parsed.into_iter().collect();
-
-        Ok(Functionalities { functionalities })
-    }
-}
+use syn::{Ident, ItemStruct};
+use crate::common::{Functionalities, Functionality};
 
 // Tokenize the intermediate representation
-
 fn get_functionality_trait_tokens(functionality: &Functionality, tokens: &mut proc_macro2::TokenStream) {
     let name = &functionality.name;
     let input_type = &functionality.input_type;

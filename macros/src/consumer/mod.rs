@@ -1,0 +1,1 @@
+pub mod consume_attribute_macro;

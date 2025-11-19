@@ -7,10 +7,9 @@ use crate::core::application::messages::{ProviderMessage};
 
 pub trait ProviderTrait {
 
-    fn get_functionalities(&self) -> ProviderMessage;
+    fn get_functionalities() -> ProviderMessage;
 
     fn run_executor(
-        &self,
         tick_duration: Duration,
         functionality_name: String,
         participant: &DomainParticipantAsync<StdRuntime>,
