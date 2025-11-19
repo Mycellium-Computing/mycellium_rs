@@ -1,12 +1,12 @@
-mod provider;
 mod common;
 mod consumer;
+mod provider;
 
-use proc_macro::{TokenStream};
-use syn::{parse_macro_input, ItemStruct};
 use crate::common::Functionalities;
 use crate::consumer::consume_attribute_macro::apply_consume_attribute_macro;
-use crate::provider::provide_attribute_macro::{apply_provide_attribute_macro};
+use crate::provider::provide_attribute_macro::apply_provide_attribute_macro;
+use proc_macro::TokenStream;
+use syn::{ItemStruct, parse_macro_input};
 
 #[proc_macro_attribute]
 pub fn provides(attr: TokenStream, item: TokenStream) -> TokenStream {

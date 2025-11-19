@@ -1,7 +1,7 @@
 use syn::parse::Parse;
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
-use syn::{Token, Type, Ident};
+use syn::{Ident, Token, Type};
 
 // Intermediate representation
 
@@ -93,6 +93,9 @@ impl Parse for Functionalities {
 
         let functionalities = functionalities_parsed.into_iter().collect();
 
-        Ok(Functionalities { runtime, functionalities })
+        Ok(Functionalities {
+            runtime,
+            functionalities,
+        })
     }
 }

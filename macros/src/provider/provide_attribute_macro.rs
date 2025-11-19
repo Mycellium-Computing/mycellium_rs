@@ -1,29 +1,37 @@
-use proc_macro::TokenStream;
-use quote::{format_ident, quote, ToTokens};
-use syn::{Ident, ItemStruct};
 use crate::common::{Functionalities, Functionality};
+use proc_macro::TokenStream;
+use quote::{ToTokens, format_ident, quote};
+use syn::{Ident, ItemStruct};
 
 // Tokenize the intermediate representation
-fn get_functionality_trait_tokens(functionality: &Functionality, tokens: &mut proc_macro2::TokenStream) {
+fn get_functionality_trait_tokens(
+    functionality: &Functionality,
+    tokens: &mut proc_macro2::TokenStream,
+) {
     let name = &functionality.name;
     let input_type = &functionality.input_type;
     let output_type = &functionality.output_type;
 
     let func_tokens = quote::quote! {
-        async fn #name(&self, input: #input_type) -> #output_type;
+        async fn #name(input: #input_type) -> #output_type;
     };
 
     tokens.extend(func_tokens);
 }
 
-fn get_functionalities_trait_tokens(functionalities: &Functionalities, tokens: &mut proc_macro2::TokenStream) {
+fn get_functionalities_trait_tokens(
+    functionalities: &Functionalities,
+    tokens: &mut proc_macro2::TokenStream,
+) {
     for functionality in &functionalities.functionalities {
         get_functionality_trait_tokens(functionality, tokens);
     }
 }
 
-
-fn get_provider_trait_tokens(struct_name: &Ident, functionalities: &Functionalities) -> proc_macro2::TokenStream {
+fn get_provider_trait_tokens(
+    struct_name: &Ident,
+    functionalities: &Functionalities,
+) -> proc_macro2::TokenStream {
     let provider_trait_name = format_ident!("{}ProviderTrait", struct_name);
 
     let mut trait_tokens = proc_macro2::TokenStream::new();
@@ -50,10 +58,16 @@ fn get_functionality_message_tokens(functionality: &Functionality) -> proc_macro
     }
 }
 
-fn get_functionalities_message_tokens(provider_name: &Ident, functionalities: &Functionalities, tokens: &mut proc_macro2::TokenStream) {
-    let functionalities_messages: Vec<proc_macro2::TokenStream> = functionalities.functionalities.iter().map(|functionality| {
-        get_functionality_message_tokens(functionality)
-    }).collect();
+fn get_functionalities_message_tokens(
+    provider_name: &Ident,
+    functionalities: &Functionalities,
+    tokens: &mut proc_macro2::TokenStream,
+) {
+    let functionalities_messages: Vec<proc_macro2::TokenStream> = functionalities
+        .functionalities
+        .iter()
+        .map(|functionality| get_functionality_message_tokens(functionality))
+        .collect();
 
     let provider_name = provider_name.to_string();
 
@@ -67,20 +81,16 @@ fn get_functionalities_message_tokens(provider_name: &Ident, functionalities: &F
     });
 }
 
-fn get_functionality_match_tokens(functionality: &Functionality) -> proc_macro2::TokenStream {
-    let name_str = &functionality.name.to_string();
-    let name_ident = &functionality.name;
-    let input_type = &functionality.input_type;
-    quote! {
-        #name_str => {
-            let input = *input.downcast::<#input_type>().unwrap();
-            Box::new(self.#name_ident(input).await)
-        }
-    }
-}
-
-fn get_functionality_channel_tokens(provider_name: &Ident, functionality: &Functionality) -> proc_macro2::TokenStream {
-    let topic_base_name = format_ident!("{}_{}", provider_name.to_string(), functionality.name.to_string()).to_string();
+fn get_functionality_channel_tokens(
+    provider_name: &Ident,
+    functionality: &Functionality,
+) -> proc_macro2::TokenStream {
+    let topic_base_name = format_ident!(
+        "{}_{}",
+        provider_name.to_string(),
+        functionality.name.to_string()
+    )
+    .to_string();
     let topic_req_name = format!("{}_Req", topic_base_name);
     let topic_res_name = format!("{}_Res", topic_base_name);
 
@@ -151,7 +161,7 @@ fn get_functionality_channel_tokens(provider_name: &Ident, functionality: &Funct
 
             if let Ok(requests) = samples {
                 let request = requests[0].data().unwrap();
-                let response = self.#name_ident(request).await;
+                let response = Self::#name_ident(request).await;
 
                 writer.write(&response, None).await.unwrap();
             }
@@ -175,23 +185,15 @@ fn get_functionality_channel_tokens(provider_name: &Ident, functionality: &Funct
     }
 }
 
-fn get_functionalities_match_tokens(functionalities: &Functionalities, tokens: &mut proc_macro2::TokenStream) {
-    let functionalities_match_branches = functionalities.functionalities.iter().map(|functionality| {
-        get_functionality_match_tokens(functionality)
-    });
-
-    tokens.extend(quote! {
-        match method {
-            #(#functionalities_match_branches,)*
-            _ => panic!("Unknown method"),
-        }
-    })
-}
-
-fn get_functionalities_channel_tokens(provider_name: &Ident, functionalities: &Functionalities, tokens: &mut proc_macro2::TokenStream) {
-    let functionalities_channel_branches = functionalities.functionalities.iter().map(|functionality| {
-        get_functionality_channel_tokens(&provider_name, functionality)
-    });
+fn get_functionalities_channel_tokens(
+    provider_name: &Ident,
+    functionalities: &Functionalities,
+    tokens: &mut proc_macro2::TokenStream,
+) {
+    let functionalities_channel_branches = functionalities
+        .functionalities
+        .iter()
+        .map(|functionality| get_functionality_channel_tokens(&provider_name, functionality));
 
     tokens.extend(quote! {
         match functionality_name.as_str() {
@@ -208,9 +210,6 @@ fn get_provider_impl_tokens(
     let mut message_tokens = proc_macro2::TokenStream::new();
     get_functionalities_message_tokens(provider_name, functionalities, &mut message_tokens);
 
-    let mut execute_tokens = proc_macro2::TokenStream::new();
-    get_functionalities_match_tokens(functionalities, &mut execute_tokens);
-
     let mut channel_tokens = proc_macro2::TokenStream::new();
     get_functionalities_channel_tokens(provider_name, functionalities, &mut channel_tokens);
 
@@ -218,12 +217,11 @@ fn get_provider_impl_tokens(
 
     quote::quote! {
         impl mycellium_computing::core::application::provider::ProviderTrait for #provider_name {
-            fn get_functionalities(&self) -> mycellium_computing::core::application::messages::ProviderMessage {
+            fn get_functionalities() -> mycellium_computing::core::application::messages::ProviderMessage {
                 #message_tokens
             }
 
             fn run_executor(
-                &self,
                 tick_duration: std::time::Duration,
                 functionality_name: String,
                 participant: &dust_dds::dds_async::domain_participant::DomainParticipantAsync<#runtime>,

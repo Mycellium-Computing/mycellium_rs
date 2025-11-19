@@ -37,21 +37,17 @@ impl Application {
     }
 
 
-    pub async fn register_provider<T>(&mut self)
-    where
-        T: ProviderTrait + Default + Send + Sync + 'static,
+    pub async fn register_provider<T: ProviderTrait>(&mut self)
     {
-        let provider = Arc::new(T::default());
-
         // Registerer task
         tokio::spawn({
-            let p = Arc::clone(&provider);
             let writer = Arc::clone(&self.provider_registration_writer);
             let reader = Arc::clone(&self.consumer_request_reader);
             let mut interval = tokio::time::interval(self.tick_duration);
             async move {
-                writer.write(&p.get_functionalities(), None).await.unwrap();
-                println!("Registered provider: {}", p.get_functionalities().provider_name);
+                let functionalities = T::get_functionalities();
+                writer.write(&functionalities, None).await.unwrap();
+                println!("Registered provider: {}", functionalities.provider_name);
 
                 loop {
                     let samples = reader.take(
@@ -59,7 +55,7 @@ impl Application {
                     ).await;
 
                     if let Ok(_) = samples {
-                        writer.write(&p.get_functionalities(), None).await.unwrap();
+                        writer.write(&functionalities, None).await.unwrap();
                     }
 
                     interval.tick().await;
@@ -67,16 +63,15 @@ impl Application {
             }
         });
 
-        for functionality in provider.get_functionalities().functionalities {
+        for functionality in T::get_functionalities().functionalities {
             tokio::spawn({
-                let p = Arc::clone(&provider);
                 let participant = Arc::clone(&self.participant);
                 let publisher = Arc::clone(&self.publisher);
                 let subscriber = Arc::clone(&self.subscriber);
                 let tick_duration = self.tick_duration.clone();
 
                 async move {
-                    p.run_executor(
+                    T::run_executor(
                         tick_duration,
                         functionality.name,
                         &participant,
@@ -89,12 +84,11 @@ impl Application {
 
         // Processing direct messages
         tokio::spawn({
-            let p = Arc::clone(&provider);
             let mut interval = tokio::time::interval(self.tick_duration);
             async move {
                 loop {
                     // Check for the consumer discovery messages and if
-                    p.get_functionalities();
+                    T::get_functionalities();
                     interval.tick().await;
                 }
             }

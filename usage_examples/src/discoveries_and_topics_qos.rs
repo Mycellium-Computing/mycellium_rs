@@ -1,20 +1,19 @@
-use std::io::{stdin, stdout, Write};
-use std::thread;
-use std::time::Duration;
-use dust_dds::{
-    domain::domain_participant_factory::DomainParticipantFactory,
-    listener::NO_LISTENER,
-    infrastructure::{qos::QosKind, status::NO_STATUS, type_support::DdsType},
-};
 use dust_dds::domain::domain_participant::DomainParticipant;
 use dust_dds::infrastructure::qos::{DataReaderQos, DataWriterQos, TopicQos};
 use dust_dds::infrastructure::qos_policy::{
-    DurabilityQosPolicy, DurabilityQosPolicyKind,
-    HistoryQosPolicy, HistoryQosPolicyKind,
+    DurabilityQosPolicy, DurabilityQosPolicyKind, HistoryQosPolicy, HistoryQosPolicyKind,
 };
 use dust_dds::infrastructure::sample_info::{ANY_INSTANCE_STATE, ANY_SAMPLE_STATE, ANY_VIEW_STATE};
 use dust_dds::std_runtime::StdRuntime;
 use dust_dds::topic_definition::topic_description::TopicDescription;
+use dust_dds::{
+    domain::domain_participant_factory::DomainParticipantFactory,
+    infrastructure::{qos::QosKind, status::NO_STATUS, type_support::DdsType},
+    listener::NO_LISTENER,
+};
+use std::io::{Write, stdin, stdout};
+use std::thread;
+use std::time::Duration;
 
 #[derive(DdsType, Debug)]
 struct HelloWorldType {
@@ -29,11 +28,11 @@ fn main() {
     let mut topic_qos = TopicQos::default();
 
     topic_qos.durability = DurabilityQosPolicy {
-        kind: DurabilityQosPolicyKind::Volatile
+        kind: DurabilityQosPolicyKind::Volatile,
     };
 
     topic_qos.history = HistoryQosPolicy {
-        kind: HistoryQosPolicyKind::KeepLast(1)
+        kind: HistoryQosPolicyKind::KeepLast(1),
     };
 
     let participant = participant_factory
@@ -41,7 +40,13 @@ fn main() {
         .unwrap();
 
     let topic = participant
-        .create_topic::<HelloWorldType>("HelloWorld", "HelloWorldType", QosKind::Specific(topic_qos), NO_LISTENER, NO_STATUS)
+        .create_topic::<HelloWorldType>(
+            "HelloWorld",
+            "HelloWorldType",
+            QosKind::Specific(topic_qos),
+            NO_LISTENER,
+            NO_STATUS,
+        )
         .unwrap();
 
     print!("Enter 1 to use as publisher and 0 to use as listener: ");
@@ -64,7 +69,7 @@ fn publisher(participant: DomainParticipant<StdRuntime>, topic: TopicDescription
     };
 
     qos_writer.history = HistoryQosPolicy {
-        kind: HistoryQosPolicyKind::KeepLast(1)
+        kind: HistoryQosPolicyKind::KeepLast(1),
     };
 
     let publisher = participant
@@ -72,7 +77,12 @@ fn publisher(participant: DomainParticipant<StdRuntime>, topic: TopicDescription
         .unwrap();
 
     let writer = publisher
-        .create_datawriter::<HelloWorldType>(&topic, QosKind::Specific(qos_writer), NO_LISTENER, NO_STATUS)
+        .create_datawriter::<HelloWorldType>(
+            &topic,
+            QosKind::Specific(qos_writer),
+            NO_LISTENER,
+            NO_STATUS,
+        )
         .unwrap();
 
     let mut i = 0;
@@ -102,12 +112,16 @@ fn listener(participant: DomainParticipant<StdRuntime>, topic: TopicDescription<
         .unwrap();
 
     let reader = subscriber
-        .create_datareader::<HelloWorldType>(&topic, QosKind::Specific(qos_reader), NO_LISTENER, NO_STATUS)
+        .create_datareader::<HelloWorldType>(
+            &topic,
+            QosKind::Specific(qos_reader),
+            NO_LISTENER,
+            NO_STATUS,
+        )
         .unwrap();
 
     loop {
-        let samples = reader
-            .take(1, ANY_SAMPLE_STATE, ANY_VIEW_STATE, ANY_INSTANCE_STATE);
+        let samples = reader.take(1, ANY_SAMPLE_STATE, ANY_VIEW_STATE, ANY_INSTANCE_STATE);
 
         if let Ok(hello_world_samples) = samples {
             if !hello_world_samples.is_empty() {

@@ -1,6 +1,5 @@
 pub mod messages;
 
-use std::time::Duration;
 use dust_dds::dds_async::domain_participant::DomainParticipantAsync;
 use dust_dds::dds_async::publisher::PublisherAsync;
 use dust_dds::dds_async::subscriber::SubscriberAsync;
@@ -8,6 +7,7 @@ use dust_dds::std_runtime::StdRuntime;
 use messages::*;
 use mycellium_computing::core::application::messages::ProviderMessage;
 use mycellium_computing::core::application::provider::ProviderTrait;
+use std::time::Duration;
 
 // #[consumes([
 //     Continuous("pepper_front_camera", ImageData), // We look for a provider that gives continuous image data
@@ -18,10 +18,14 @@ use mycellium_computing::core::application::provider::ProviderTrait;
 
 // Generated struct instead:
 struct VisionUtilities {
-    pepper_front_camera_reader: dust_dds::dds_async::data_reader::DataReaderAsync<StdRuntime, ImageData>,
-    pepper_depth_camera_reader: dust_dds::dds_async::data_reader::DataReaderAsync<StdRuntime, ImageDepthData>,
-    vision_tools_request_writer: dust_dds::dds_async::data_writer::DataWriterAsync<StdRuntime, CameraConfig>,
-    vision_tools_response_reader: dust_dds::dds_async::data_reader::DataReaderAsync<StdRuntime, CameraConfig>,
+    pepper_front_camera_reader:
+        dust_dds::dds_async::data_reader::DataReaderAsync<StdRuntime, ImageData>,
+    pepper_depth_camera_reader:
+        dust_dds::dds_async::data_reader::DataReaderAsync<StdRuntime, ImageDepthData>,
+    vision_tools_request_writer:
+        dust_dds::dds_async::data_writer::DataWriterAsync<StdRuntime, CameraConfig>,
+    vision_tools_response_reader:
+        dust_dds::dds_async::data_reader::DataReaderAsync<StdRuntime, CameraConfig>,
 }
 
 // hidden
@@ -62,7 +66,8 @@ impl VisionUtilities {
 
 // the following struct is generated instead:
 struct FaceRecognition<S: Send + Sync> {
-    person_in_frame_writer: dust_dds::dds_async::data_writer::DataWriterAsync<StdRuntime, PersonFrameData>,
+    person_in_frame_writer:
+        dust_dds::dds_async::data_writer::DataWriterAsync<StdRuntime, PersonFrameData>,
     state: S,
 }
 
@@ -71,9 +76,9 @@ struct FaceRecognition<S: Send + Sync> {
 // continuously receives image and depth data from the camera providers, it implements face recognition using the received data,
 // and provides the face recognition results and available models as request-response and continuous providers respectively.
 
-
 // Hidden
-trait FaceRecognitionReqResProvider<S: Send + Sync> { // Only implement the request-response functionalities
+trait FaceRecognitionReqResProvider<S: Send + Sync> {
+    // Only implement the request-response functionalities
     async fn face_recognition(input: FaceRecognitionRequest, state: S) -> FaceRecognitionResponse;
     async fn available_models(state: S) -> ModelsInfo;
 }
@@ -86,11 +91,9 @@ trait FaceRecognitionContinuousProvider {
 // Hidden
 impl<S: Send + Sync> FaceRecognitionContinuousProvider for FaceRecognition<S> {
     async fn person_in_frame(&self, data: &PersonFrameData) {
-        self.person_in_frame_writer.write(data, None)
-            .await.unwrap();
+        self.person_in_frame_writer.write(data, None).await.unwrap();
     }
 }
-
 
 // Hidden
 impl<S: Send + Sync> ProviderTrait for FaceRecognition<S> {
@@ -98,7 +101,13 @@ impl<S: Send + Sync> ProviderTrait for FaceRecognition<S> {
         todo!()
     }
 
-    async fn run_executor(tick_duration: Duration, functionality_name: String, participant: &DomainParticipantAsync<StdRuntime>, publisher: &PublisherAsync<StdRuntime>, subscriber: &SubscriberAsync<StdRuntime>) {
+    async fn run_executor(
+        tick_duration: Duration,
+        functionality_name: String,
+        participant: &DomainParticipantAsync<StdRuntime>,
+        publisher: &PublisherAsync<StdRuntime>,
+        subscriber: &SubscriberAsync<StdRuntime>,
+    ) {
         todo!()
     }
 }
@@ -119,9 +128,11 @@ struct MyAppState {
 }
 
 // FOR THE USER
-impl FaceRecognitionReqResProvider<MyAppState> for FaceRecognition<MyAppState>
-{
-    async fn face_recognition(input: FaceRecognitionRequest, state: MyAppState) -> FaceRecognitionResponse {
+impl FaceRecognitionReqResProvider<MyAppState> for FaceRecognition<MyAppState> {
+    async fn face_recognition(
+        input: FaceRecognitionRequest,
+        state: MyAppState,
+    ) -> FaceRecognitionResponse {
         todo!()
     }
 
@@ -130,6 +141,4 @@ impl FaceRecognitionReqResProvider<MyAppState> for FaceRecognition<MyAppState>
     }
 }
 
-async fn main() {
-
-}
+async fn main() {}

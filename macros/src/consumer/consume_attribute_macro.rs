@@ -1,9 +1,11 @@
+use crate::common::Functionalities;
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::ItemStruct;
-use crate::common::Functionalities;
 
-fn get_functionalities_readers_attributes(functionalities: &Functionalities) -> Vec<proc_macro2::TokenStream> {
+fn get_functionalities_readers_attributes(
+    functionalities: &Functionalities,
+) -> Vec<proc_macro2::TokenStream> {
     let runtime = &functionalities.runtime;
     functionalities.functionalities.iter().map(|functionality| {
         let name = &functionality.name;
@@ -16,7 +18,9 @@ fn get_functionalities_readers_attributes(functionalities: &Functionalities) -> 
     }).collect()
 }
 
-fn get_functionalities_writers_attributes(functionalities: &Functionalities) -> Vec<proc_macro2::TokenStream> {
+fn get_functionalities_writers_attributes(
+    functionalities: &Functionalities,
+) -> Vec<proc_macro2::TokenStream> {
     let runtime = &functionalities.runtime;
     functionalities.functionalities.iter().map(|functionality| {
         let name = &functionality.name;
@@ -29,40 +33,48 @@ fn get_functionalities_writers_attributes(functionalities: &Functionalities) -> 
     }).collect()
 }
 
-fn get_functionalities_topics_instantiations(functionalities: &Functionalities) -> Vec<proc_macro2::TokenStream> {
-    functionalities.functionalities.iter().map(|functionality| {
-        let name = &functionality.name;
+fn get_functionalities_topics_instantiations(
+    functionalities: &Functionalities,
+) -> Vec<proc_macro2::TokenStream> {
+    functionalities
+        .functionalities
+        .iter()
+        .map(|functionality| {
+            let name = &functionality.name;
 
-        let req_topic_name = format_ident!("{}_Req", name.to_string().to_lowercase()).to_string();
-        let res_topic_name = format_ident!("{}_Res", name.to_string().to_lowercase()).to_string();
+            let req_topic_name =
+                format_ident!("{}_Req", name.to_string().to_lowercase()).to_string();
+            let res_topic_name =
+                format_ident!("{}_Res", name.to_string().to_lowercase()).to_string();
 
-        let output_type = &functionality.output_type;
-        let input_type = &functionality.input_type;
+            let output_type = &functionality.output_type;
+            let input_type = &functionality.input_type;
 
-        // The consumer writes to the request topic and reads from the response topic
+            // The consumer writes to the request topic and reads from the response topic
 
-        quote! {
-            let req_topic = participant.create_topic::<#input_type>(
-                #req_topic_name,
-                #input_type,
-                dust_dds::infrastructure::qos::QosKind::Default,
-                dust_dds::listener::NO_LISTENER,
-                dust_dds::infrastructure::status::NO_STATUS,
-            )
-            .await
-            .unwrap();
+            quote! {
+                let req_topic = participant.create_topic::<#input_type>(
+                    #req_topic_name,
+                    #input_type,
+                    dust_dds::infrastructure::qos::QosKind::Default,
+                    dust_dds::listener::NO_LISTENER,
+                    dust_dds::infrastructure::status::NO_STATUS,
+                )
+                .await
+                .unwrap();
 
-            let res_topic = participant.create_topic::<#output_type>(
-                #res_topic_name,
-                #output_type,
-                dust_dds::infrastructure::qos::QosKind::Default,
-                dust_dds::listener::NO_LISTENER,
-                dust_dds::infrastructure::status::NO_STATUS,
-            )
-            .await
-            .unwrap();
-        }
-    }).collect()
+                let res_topic = participant.create_topic::<#output_type>(
+                    #res_topic_name,
+                    #output_type,
+                    dust_dds::infrastructure::qos::QosKind::Default,
+                    dust_dds::listener::NO_LISTENER,
+                    dust_dds::infrastructure::status::NO_STATUS,
+                )
+                .await
+                .unwrap();
+            }
+        })
+        .collect()
 }
 
 pub fn apply_consume_attribute_macro(
