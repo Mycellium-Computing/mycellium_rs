@@ -12,8 +12,15 @@ fn get_functionality_trait_tokens(
     let input_type = &functionality.input_type;
     let output_type = &functionality.output_type;
 
-    let func_tokens = quote::quote! {
-        async fn #name(input: #input_type) -> #output_type;
+
+    let func_tokens = if functionality.input_type.is_none() {
+        quote::quote! {
+            async fn #name() -> #output_type;
+        }
+    } else {
+        quote::quote! {
+            async fn #name(input: #input_type) -> #output_type;
+        }
     };
 
     tokens.extend(func_tokens);
@@ -50,7 +57,7 @@ fn get_functionality_message_tokens(functionality: &Functionality) -> proc_macro
     let output_type = &functionality.output_type.to_token_stream().to_string();
 
     quote! {
-        mycellium_computing::core::application::messages::ProvidedFunctionality {
+        mycellium_computing::core::messages::ProvidedFunctionality {
             name: #name.to_string(),
             input_type: #input_type.to_string(),
             output_type: #output_type.to_string(),
@@ -72,7 +79,7 @@ fn get_functionalities_message_tokens(
     let provider_name = provider_name.to_string();
 
     tokens.extend(quote! {
-        mycellium_computing::core::application::messages::ProviderMessage {
+        mycellium_computing::core::messages::ProviderMessage {
             provider_name: #provider_name.to_string(),
             functionalities: vec![
                 #(#functionalities_messages),*
@@ -97,7 +104,16 @@ fn get_functionality_channel_tokens(
     println!("Generating topics for service {}", topic_base_name);
 
     let name_ident = &functionality.name;
-    let input_type = &functionality.input_type;
+    let input_type = if functionality.input_type.is_none() {
+        quote::quote! {
+            mycellium_computing::core::messages::ProviderRequest::<mycellium_computing::core::messages::EmptyMessage>
+        }
+    } else {
+        let provider_input_type = functionality.input_type.as_ref().unwrap();
+        quote::quote! {
+            mycellium_computing::core::messages::ProviderRequest::<#provider_input_type>
+        }
+    };
     let output_type = &functionality.output_type;
 
     let topic_req_input_type_name = input_type.to_token_stream().to_string();
@@ -149,6 +165,16 @@ fn get_functionality_channel_tokens(
             .unwrap();
     };
 
+    let method_call = if functionality.input_type.is_none() {
+        quote! {
+            Self::#name_ident().await
+        }
+    } else {
+        quote! {
+            Self::#name_ident(request.payload).await
+        }
+    };
+
     let execution_tokens = quote! {
         let mut interval = tokio::time::interval(tick_duration);
         loop {
@@ -161,7 +187,7 @@ fn get_functionality_channel_tokens(
 
             if let Ok(requests) = samples {
                 let request = requests[0].data().unwrap();
-                let response = Self::#name_ident(request).await;
+                let response = #method_call;
 
                 writer.write(&response, None).await.unwrap();
             }
@@ -217,7 +243,7 @@ fn get_provider_impl_tokens(
 
     quote::quote! {
         impl mycellium_computing::core::application::provider::ProviderTrait for #provider_name {
-            fn get_functionalities() -> mycellium_computing::core::application::messages::ProviderMessage {
+            fn get_functionalities() -> mycellium_computing::core::messages::ProviderMessage {
                 #message_tokens
             }
 

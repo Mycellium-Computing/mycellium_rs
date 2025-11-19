@@ -4,10 +4,11 @@ use syn::token::Comma;
 use syn::{Ident, Token, Type};
 
 // Intermediate representation
-
+#[derive(PartialEq)]
 pub enum FunctionalityKind {
     Continuous,
     RequestResponse,
+    Response,
 }
 
 // Example of the tokens' representation:
@@ -16,7 +17,7 @@ pub enum FunctionalityKind {
 // RequestResponse("service_name", None, ResponseType)
 pub struct Functionality {
     pub name: Ident,
-    pub input_type: Type,
+    pub input_type: Option<Type>,
     pub output_type: Type,
     pub kind: FunctionalityKind,
 }
@@ -30,11 +31,12 @@ impl Parse for Functionality {
         let kind = match kind_ident.to_string().as_str() {
             "Continuous" => FunctionalityKind::Continuous,
             "RequestResponse" => FunctionalityKind::RequestResponse,
+            "Response" => FunctionalityKind::Response,
             _ => {
                 return Err(syn::Error::new(
                     kind_ident.span(),
                     format!(
-                        "expected `Continuous` or `RequestResponse`, found `{}`",
+                        "expected `Continuous` or `RequestResponse` or `Response`, found `{}`",
                         kind_ident
                     ),
                 ));
@@ -44,11 +46,19 @@ impl Parse for Functionality {
         // Parse the content inside the parentheses
         let content;
         syn::parenthesized!(content in input);
+        
+        println!("{:?}", content.to_string());
 
         let name_lit: syn::LitStr = content.parse()?;
         content.parse::<Token![,]>()?;
-        let input_type: Type = content.parse()?;
-        content.parse::<Token![,]>()?;
+
+        let input_type: Option<Type> = if kind == FunctionalityKind::RequestResponse {
+            let value: Type = content.parse()?;
+            content.parse::<Token![,]>()?;
+            Some(value)
+        } else {
+            None
+        };
         let output_type: Type = content.parse()?;
 
         let name = Ident::new(&name_lit.value(), name_lit.span());

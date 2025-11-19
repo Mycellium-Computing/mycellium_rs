@@ -1,4 +1,3 @@
-pub mod messages;
 pub mod provider;
 pub mod consumer;
 
@@ -10,12 +9,12 @@ use dust_dds::dds_async::domain_participant::DomainParticipantAsync;
 use dust_dds::dds_async::domain_participant_factory::DomainParticipantFactoryAsync;
 use dust_dds::dds_async::publisher::PublisherAsync;
 use dust_dds::dds_async::subscriber::SubscriberAsync;
-use dust_dds::infrastructure::qos::{QosKind};
+use dust_dds::infrastructure::qos::QosKind;
 use dust_dds::infrastructure::sample_info::{ANY_INSTANCE_STATE, ANY_SAMPLE_STATE, ANY_VIEW_STATE};
 use dust_dds::infrastructure::status::NO_STATUS;
 use dust_dds::listener::NO_LISTENER;
 use dust_dds::std_runtime::StdRuntime;
-use crate::core::application::messages::{ConsumerDiscovery, ProviderMessage};
+use crate::core::messages::{ConsumerDiscovery, ProviderMessage};
 use crate::core::application::provider::ProviderTrait;
 
 pub struct Application {
