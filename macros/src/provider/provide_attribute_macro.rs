@@ -214,6 +214,8 @@ fn get_provider_impl_tokens(
     let mut channel_tokens = proc_macro2::TokenStream::new();
     get_functionalities_channel_tokens(provider_name, functionalities, &mut channel_tokens);
 
+    let runtime = &functionalities.runtime;
+
     quote::quote! {
         impl mycellium_computing::core::application::provider::ProviderTrait for #provider_name {
             fn get_functionalities(&self) -> mycellium_computing::core::application::messages::ProviderMessage {
@@ -224,9 +226,9 @@ fn get_provider_impl_tokens(
                 &self,
                 tick_duration: std::time::Duration,
                 functionality_name: String,
-                participant: &dust_dds::dds_async::domain_participant::DomainParticipantAsync<dust_dds::std_runtime::StdRuntime>,
-                publisher: &dust_dds::dds_async::publisher::PublisherAsync<dust_dds::std_runtime::StdRuntime>,
-                subscriber: &dust_dds::dds_async::subscriber::SubscriberAsync<dust_dds::std_runtime::StdRuntime>
+                participant: &dust_dds::dds_async::domain_participant::DomainParticipantAsync<#runtime>,
+                publisher: &dust_dds::dds_async::publisher::PublisherAsync<#runtime>,
+                subscriber: &dust_dds::dds_async::subscriber::SubscriberAsync<#runtime>
             ) -> impl Future<Output = ()> + Send {
                 async move { #channel_tokens }
             }

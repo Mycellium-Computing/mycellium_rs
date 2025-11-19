@@ -4,25 +4,27 @@ use syn::ItemStruct;
 use crate::common::Functionalities;
 
 fn get_functionalities_readers_attributes(functionalities: &Functionalities) -> Vec<proc_macro2::TokenStream> {
+    let runtime = &functionalities.runtime;
     functionalities.functionalities.iter().map(|functionality| {
         let name = &functionality.name;
         let reader_ident = format_ident!("{}_reader", name.to_string().to_lowercase());
         let output_type = &functionality.output_type;
 
         quote! {
-            #reader_ident: dust_dds::dds_async::data_reader::DataReaderAsync<StdRuntime, #output_type>
+            #reader_ident: dust_dds::dds_async::data_reader::DataReaderAsync<#runtime, #output_type>
         }
     }).collect()
 }
 
 fn get_functionalities_writers_attributes(functionalities: &Functionalities) -> Vec<proc_macro2::TokenStream> {
+    let runtime = &functionalities.runtime;
     functionalities.functionalities.iter().map(|functionality| {
         let name = &functionality.name;
         let writer_ident = format_ident!("{}_writer", name.to_string().to_lowercase());
         let input_type = &functionality.input_type;
 
         quote! {
-            #writer_ident: dust_dds::dds_async::data_writer::DataWriterAsync<StdRuntime, #input_type>
+            #writer_ident: dust_dds::dds_async::data_writer::DataWriterAsync<#runtime, #input_type>
         }
     }).collect()
 }
@@ -68,6 +70,7 @@ pub fn apply_consume_attribute_macro(
     struct_input: &ItemStruct,
 ) -> TokenStream {
     let struct_name = &struct_input.ident;
+    let runtime = &functionalities.runtime;
 
     let consumer_struct = format_ident!("{}Consumer", struct_name);
 
@@ -86,8 +89,9 @@ pub fn apply_consume_attribute_macro(
 
         impl mycellium_computing::core::application::consumer::Consumer for #struct_name {
             async fn init(
-                subscriber: dust_dds::dds_async::publisher::SubscriberAsync,
-                publisher: dust_dds::dds_async::publisher::PublisherAsync,
+                participant: &dust_dds::dds_async::domain_participant::DomainParticipantAsync<#runtime>,
+                subscriber: &dust_dds::dds_async::subscriber::SubscriberAsync<#runtime>,
+                publisher: &dust_dds::dds_async::publisher::PublisherAsync<#runtime>,
             ) -> #consumer_struct {
                 #(#data_topics_instantiations)*
 
