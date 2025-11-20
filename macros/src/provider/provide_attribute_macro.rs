@@ -1,4 +1,4 @@
-use crate::common::{Functionalities, Functionality};
+use crate::common::{Functionalities, Functionality, FunctionalityKind};
 use proc_macro::TokenStream;
 use quote::{ToTokens, format_ident, quote};
 use syn::{Ident, ItemStruct};
@@ -31,8 +31,88 @@ fn get_functionalities_trait_tokens(
     tokens: &mut proc_macro2::TokenStream,
 ) {
     for functionality in &functionalities.functionalities {
+        if functionality.kind == FunctionalityKind::Continuous {
+            continue;
+        }
         get_functionality_trait_tokens(functionality, tokens);
     }
+}
+
+
+fn get_continuous_functionalities_trait_tokens(
+    struct_name: &Ident,
+    functionalities: &Functionalities,
+    tokens: &mut proc_macro2::TokenStream,
+) {
+    if !functionalities
+        .functionalities
+        .iter()
+        .any(|f| f.kind == FunctionalityKind::Continuous)
+    {
+        return;
+    }
+
+    let trait_tokens = functionalities
+        .functionalities
+        .iter()
+        .filter(|f| f.kind == FunctionalityKind::Continuous)
+        .map(|functionality| {
+            let name = &functionality.name;
+            let output_type = &functionality.output_type;
+
+            let func_tokens = quote! {
+                async fn #name(data: &#output_type);
+            };
+
+            func_tokens
+        });
+
+    let trait_name = format_ident!("{}ContinuousProviderTrait", struct_name);
+
+    tokens.extend(quote! {
+        trait #trait_name {
+            #(#trait_tokens),*
+        }
+    });
+}
+
+fn get_continuous_functionalities_trait_impl_tokens(
+    struct_name: &Ident,
+    functionalities: &Functionalities,
+    tokens: &mut proc_macro2::TokenStream,
+) {
+    if !functionalities
+        .functionalities
+        .iter()
+        .any(|f| f.kind == FunctionalityKind::Continuous)
+    {
+        return;
+    }
+
+    let impl_tokens = functionalities
+        .functionalities
+        .iter()
+        .filter(|f| f.kind == FunctionalityKind::Continuous)
+        .map(|functionality| {
+            let name = &functionality.name;
+            let output_type = &functionality.output_type;
+
+            let func_tokens = quote! {
+                async fn #name(data: &#output_type) {
+                    // TODO: Decide how to send the continuous data message
+                }
+            };
+
+            func_tokens
+        });
+
+    let trait_name = format_ident!("{}ContinuousProviderTrait", struct_name);
+
+    tokens.extend(quote! {
+        impl #trait_name for #struct_name {
+            #(#impl_tokens),*
+        }
+    });
 }
 
 fn get_provider_trait_tokens(
@@ -44,10 +124,15 @@ fn get_provider_trait_tokens(
     let mut trait_tokens = proc_macro2::TokenStream::new();
     get_functionalities_trait_tokens(functionalities, &mut trait_tokens);
 
+    let mut continuous_trait_tokens = proc_macro2::TokenStream::new();
+    get_continuous_functionalities_trait_tokens(struct_name, functionalities, &mut continuous_trait_tokens);
+
     quote! {
         trait #provider_trait_name {
             #trait_tokens
         }
+
+        #continuous_trait_tokens
     }
 }
 
@@ -219,6 +304,7 @@ fn get_functionalities_channel_tokens(
     let functionalities_channel_branches = functionalities
         .functionalities
         .iter()
+        .filter(|x| x.kind != FunctionalityKind::Continuous)
         .map(|functionality| get_functionality_channel_tokens(&provider_name, functionality));
 
     tokens.extend(quote! {
@@ -239,6 +325,9 @@ fn get_provider_impl_tokens(
     let mut channel_tokens = proc_macro2::TokenStream::new();
     get_functionalities_channel_tokens(provider_name, functionalities, &mut channel_tokens);
 
+    let mut continuous_trait_implementation_tokens = proc_macro2::TokenStream::new();
+    get_continuous_functionalities_trait_impl_tokens(provider_name, functionalities, &mut continuous_trait_implementation_tokens);
+
     let runtime = &functionalities.runtime;
 
     quote::quote! {
@@ -257,6 +346,8 @@ fn get_provider_impl_tokens(
                 async move { #channel_tokens }
             }
         }
+
+        #continuous_trait_implementation_tokens
     }
 }
 

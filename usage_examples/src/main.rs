@@ -14,7 +14,7 @@ const HERTZ: u32 = 360;
 #[provides(StdRuntime, [
     RequestResponse("face_recognition", FaceRecognitionRequest, FaceRecognitionResponse),
     Response("available_models", ModelsInfo),
-    Continuous("person_in_frame", PersonFrameData),
+    Continuous("person_in_frame", &PersonFrameData),
 ])]
 struct FaceRecognition;
 
@@ -24,10 +24,6 @@ impl FaceRecognitionProviderTrait for FaceRecognition {
     }
 
     async fn available_models() -> ModelsInfo {
-        todo!()
-    }
-
-    async fn person_in_frame() -> PersonFrameData {
         todo!()
     }
 }
