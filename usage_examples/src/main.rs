@@ -1,7 +1,6 @@
-mod consumer_impl;
-mod discoveries_and_topics_qos;
+mod example_messages;
 
-use crate::consumer_impl::messages::*;
+use crate::example_messages::face_recognition::*;
 use dust_dds::infrastructure::type_support::{DdsType};
 use dust_dds::std_runtime::StdRuntime;
 use mycellium_computing::core::application::Application;
@@ -11,6 +10,9 @@ use std::time::Duration;
 
 const HERTZ: u32 = 360;
 
+// TODO: Allow state.
+// TODO:  (Backlog) completely decouple from StdRuntime to allow other runtimes.(To be implemented by the user)
+// Creates a method "person_in_frame", which is used to publish a data piece when needed.
 #[provides(StdRuntime, [
     RequestResponse("face_recognition", FaceRecognitionRequest, FaceRecognitionResponse),
     Response("available_models", ModelsInfo),
@@ -18,6 +20,7 @@ const HERTZ: u32 = 360;
 ])]
 struct FaceRecognition;
 
+// Callbacks implementing the provider functionality
 impl FaceRecognitionProviderTrait for FaceRecognition {
     async fn face_recognition(input: FaceRecognitionRequest) -> FaceRecognitionResponse {
         todo!()

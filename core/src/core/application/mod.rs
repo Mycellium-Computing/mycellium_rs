@@ -40,10 +40,12 @@ impl Application {
     pub async fn register_provider<T: ProviderTrait>(&mut self)
     {
         // Registerer task
+        // TODO: Register the ProviderMessage into a Shared list that is sent by a listener over the self.consumer_request_reader
         tokio::spawn({
             let writer = Arc::clone(&self.provider_registration_writer);
             let reader = Arc::clone(&self.consumer_request_reader);
             let mut interval = tokio::time::interval(self.tick_duration);
+
             async move {
                 let functionalities = T::get_functionalities();
                 writer.write(&functionalities, None).await.unwrap();
@@ -72,18 +74,6 @@ impl Application {
             ).await;
             // TODO: Should return the writer, reader, topic and listener maybe? I suspect that not returning them and somehow maintaining those references alive will kill the service due to rust reference drop
         }
-
-        // Processing direct messages
-        tokio::spawn({
-            let mut interval = tokio::time::interval(self.tick_duration);
-            async move {
-                loop {
-                    // Check for the consumer discovery messages and if
-                    T::get_functionalities();
-                    interval.tick().await;
-                }
-            }
-        });
     }
 
     pub async fn new(domain_id: u32, name: &str, tick_duration: Duration) -> Self {
@@ -124,16 +114,19 @@ impl Application {
             .await
             .unwrap();
 
+        // TODO: Define the specific QoS configuration for the reader
         let consumer_request_reader = subscriber
             .create_datareader::<ConsumerDiscovery>(&consumer_request_topic, QosKind::Default, NO_LISTENER, NO_STATUS)
             .await
             .unwrap();
 
+        // TODO: Define the specific QoS configuration for the writer
         let provider_registration_writer = publisher
             .create_datawriter::<ProviderMessage>(&provider_registration_topic, QosKind::Default, NO_LISTENER, NO_STATUS)
             .await
             .unwrap();
 
+        // TODO: Reduce the Arc usage
         Application {
             name: name.to_string(),
             tick_duration,
