@@ -228,15 +228,14 @@ fn get_functionality_channel_tokens(
 
     };
 
-    let reader_tokens = quote! {
-        let reader = subscriber.create_datareader::<#input_type>(
-            &request_topic,
-            dust_dds::infrastructure::qos::QosKind::Default,
-            dust_dds::listener::NO_LISTENER,
-            dust_dds::infrastructure::status::NO_STATUS
-        )
-            .await
-            .unwrap();
+    let method_call = if functionality.input_type.is_none() {
+        quote! {
+            #provider_name::#name_ident().await
+        }
+    } else {
+        quote! {
+            #provider_name::#name_ident(request.payload).await
+        }
     };
 
     let writer_tokens = quote! {
@@ -250,35 +249,29 @@ fn get_functionality_channel_tokens(
             .unwrap();
     };
 
-    let method_call = if functionality.input_type.is_none() {
-        quote! {
-            Self::#name_ident().await
-        }
-    } else {
-        quote! {
-            Self::#name_ident(request.payload).await
-        }
+    let listener_tokens = quote! {
+        let listener = mycellium_computing::core::listener::RequestListener {
+            writer,
+            implementation: Box::new(|request: #input_type| {
+                Box::pin(async move {
+                    #method_call
+                })
+            }),
+        };
     };
 
-    let execution_tokens = quote! {
-        let mut interval = tokio::time::interval(tick_duration);
-        loop {
-            let samples = reader.take(
-                1,
-                dust_dds::infrastructure::sample_info::ANY_SAMPLE_STATE,
-                dust_dds::infrastructure::sample_info::ANY_VIEW_STATE,
-                dust_dds::infrastructure::sample_info::ANY_INSTANCE_STATE
-            ).await;
+    let reader_tokens = quote! {
+        #listener_tokens
 
-            if let Ok(requests) = samples {
-                let request = requests[0].data().unwrap();
-                let response = #method_call;
 
-                writer.write(&response, None).await.unwrap();
-            }
-
-            interval.tick().await;
-        }
+        let reader = subscriber.create_datareader::<#input_type>(
+            &request_topic,
+            dust_dds::infrastructure::qos::QosKind::Default,
+            Some(listener),
+            &[dust_dds::infrastructure::status::StatusKind::DataAvailable]
+        )
+            .await
+            .unwrap();
     };
 
     let name_str = &functionality.name.to_string();
@@ -287,11 +280,9 @@ fn get_functionality_channel_tokens(
         #name_str => {
             #topic_tokens
 
-            #reader_tokens
-
             #writer_tokens
 
-            #execution_tokens
+            #reader_tokens
         }
     }
 }
@@ -336,14 +327,13 @@ fn get_provider_impl_tokens(
                 #message_tokens
             }
 
-            fn run_executor(
-                tick_duration: std::time::Duration,
+            async fn create_execution_objects(
                 functionality_name: String,
                 participant: &dust_dds::dds_async::domain_participant::DomainParticipantAsync<#runtime>,
                 publisher: &dust_dds::dds_async::publisher::PublisherAsync<#runtime>,
                 subscriber: &dust_dds::dds_async::subscriber::SubscriberAsync<#runtime>
-            ) -> impl Future<Output = ()> + Send {
-                async move { #channel_tokens }
+            ) {
+                #channel_tokens
             }
         }
 

@@ -14,8 +14,9 @@ use dust_dds::infrastructure::sample_info::{ANY_INSTANCE_STATE, ANY_SAMPLE_STATE
 use dust_dds::infrastructure::status::NO_STATUS;
 use dust_dds::listener::NO_LISTENER;
 use dust_dds::std_runtime::StdRuntime;
-use crate::core::messages::{ConsumerDiscovery, ProviderMessage};
+use crate::core::messages::{ConsumerDiscovery, ProviderMessage, ProviderRequest};
 use crate::core::application::provider::ProviderTrait;
+use crate::core::listener::RequestListener;
 
 pub struct Application {
     name: String,
@@ -63,22 +64,13 @@ impl Application {
         });
 
         for functionality in T::get_functionalities().functionalities {
-            tokio::spawn({
-                let participant = Arc::clone(&self.participant);
-                let publisher = Arc::clone(&self.publisher);
-                let subscriber = Arc::clone(&self.subscriber);
-                let tick_duration = self.tick_duration.clone();
-
-                async move {
-                    T::run_executor(
-                        tick_duration,
-                        functionality.name,
-                        &participant,
-                        &publisher,
-                        &subscriber
-                    ).await
-                }
-            });
+            T::create_execution_objects(
+                functionality.name,
+                &self.participant,
+                &self.publisher,
+                &self.subscriber
+            ).await;
+            // TODO: Should return the writer, reader, topic and listener maybe? I suspect that not returning them and somehow maintaining those references alive will kill the service due to rust reference drop
         }
 
         // Processing direct messages

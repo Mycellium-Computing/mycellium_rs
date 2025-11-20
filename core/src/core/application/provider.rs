@@ -9,11 +9,10 @@ pub trait ProviderTrait {
 
     fn get_functionalities() -> ProviderMessage;
 
-    fn run_executor(
-        tick_duration: Duration,
+    fn create_execution_objects(
         functionality_name: String,
         participant: &DomainParticipantAsync<StdRuntime>,
         publisher: &PublisherAsync<StdRuntime>,
         subscriber: &SubscriberAsync<StdRuntime>
-    ) -> impl Future<Output = ()> + Send;
+    ) -> impl Future<Output = ()>;
 }
