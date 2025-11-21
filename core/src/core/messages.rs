@@ -27,12 +27,12 @@ pub struct ConsumerDiscovery {
 pub struct EmptyMessage;
 
 #[derive(DdsType, Debug)]
-pub struct ProviderRequest<T: TypeSupport + XTypesSerialize + for <'a> XTypesDeserialize<'a> + Send>  {
+pub struct ProviderExchange<T: TypeSupport + XTypesSerialize + for <'a> XTypesDeserialize<'a> + Send>  {
     pub id: u32,
     pub payload: T,
 }
 
-impl<T: TypeSupport + XTypesSerialize + for <'a> XTypesDeserialize<'a> + Send> ProviderRequest<T> {
+impl<T: TypeSupport + XTypesSerialize + for <'a> XTypesDeserialize<'a> + Send> ProviderExchange<T> {
     pub fn new(id: u32, payload: T) -> Self {
         Self { id, payload }
     }

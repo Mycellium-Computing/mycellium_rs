@@ -4,7 +4,7 @@ use syn::token::Comma;
 use syn::{Ident, Token, Type};
 
 // Intermediate representation
-#[derive(PartialEq)]
+#[derive(Eq, Debug, PartialEq)]
 pub enum FunctionalityKind {
     Continuous,
     RequestResponse,
@@ -72,8 +72,6 @@ impl Parse for Functionality {
     }
 }
 
-// Before: #[provides([...])]
-// Now: #[provides(runtime, [...])]
 pub struct Functionalities {
     pub runtime: Ident,
     pub functionalities: Vec<Functionality>,

@@ -161,6 +161,7 @@ fn get_functionalities_message_tokens(
     let functionalities_messages: Vec<proc_macro2::TokenStream> = functionalities
         .functionalities
         .iter()
+        .filter(|x| x.kind != FunctionalityKind::Continuous)
         .map(|functionality| get_functionality_message_tokens(functionality))
         .collect();
 
@@ -194,12 +195,12 @@ fn get_functionality_channel_tokens(
     let name_ident = &functionality.name;
     let input_type = if functionality.input_type.is_none() {
         quote::quote! {
-            mycellium_computing::core::messages::ProviderRequest::<mycellium_computing::core::messages::EmptyMessage>
+            mycellium_computing::core::messages::ProviderExchange::<mycellium_computing::core::messages::EmptyMessage>
         }
     } else {
         let provider_input_type = functionality.input_type.as_ref().unwrap();
         quote::quote! {
-            mycellium_computing::core::messages::ProviderRequest::<#provider_input_type>
+            mycellium_computing::core::messages::ProviderExchange::<#provider_input_type>
         }
     };
     let output_type = &functionality.output_type;
@@ -304,7 +305,7 @@ fn get_functionalities_channel_tokens(
     tokens.extend(quote! {
         match functionality_name.as_str() {
             #(#functionalities_channel_branches,)*
-            _ => panic!("Unknown functionality"),
+            _ => panic!("Unknown functionality {:?}", functionality_name),
         }
     })
 }
@@ -348,6 +349,13 @@ pub fn apply_provide_attribute_macro(
     functionalities: &Functionalities,
     struct_input: &ItemStruct,
 ) -> TokenStream {
+    println!("Parsed functionalities:");
+    for functionality in &functionalities.functionalities {
+        println!(
+            "- {} (kind: {:?})",
+            functionality.name, functionality.kind
+        );
+    }
     let struct_name = &struct_input.ident;
     let provider_trait = get_provider_trait_tokens(struct_name, functionalities);
     let provider_impl = get_provider_impl_tokens(&struct_name, functionalities);

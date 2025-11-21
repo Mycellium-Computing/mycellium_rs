@@ -1,4 +1,4 @@
-use crate::core::messages::{ConsumerDiscovery, ProviderMessage};
+use crate::core::messages::{ConsumerDiscovery, ProviderExchange, ProviderMessage};
 use dust_dds::dds_async::data_reader::DataReaderAsync;
 use dust_dds::dds_async::data_writer::DataWriterAsync;
 use dust_dds::infrastructure::sample_info::{ANY_INSTANCE_STATE, ANY_SAMPLE_STATE, ANY_VIEW_STATE};
@@ -7,6 +7,9 @@ use dust_dds::std_runtime::StdRuntime;
 use dust_dds::subscription::data_reader_listener::DataReaderListener;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use dust_dds::std_runtime::oneshot::OneshotSender;
+use dust_dds::xtypes::deserialize::XTypesDeserialize;
+use dust_dds::xtypes::serialize::XTypesSerialize;
 
 pub struct RequestListener<T, R> {
     pub writer: DataWriterAsync<StdRuntime, R>,
@@ -57,5 +60,46 @@ impl DataReaderListener<StdRuntime, ConsumerDiscovery> for ConsumerAppearListene
                 }
             }
         }
+    }
+}
+
+pub struct ProviderResponseListener<T: Send>
+{
+    pub expected_id: u32,
+    pub response_sender: Option<OneshotSender<T>>
+}
+
+impl<T> DataReaderListener<StdRuntime, ProviderExchange<T>> for ProviderResponseListener<T>
+where
+    T: TypeSupport + XTypesSerialize + for <'a> XTypesDeserialize<'a> + Send + Sync + 'static,
+{
+    async fn on_data_available(&mut self, reader: DataReaderAsync<StdRuntime, ProviderExchange<T>>) {
+        let samples = reader
+            .take(1, ANY_SAMPLE_STATE, ANY_VIEW_STATE, ANY_INSTANCE_STATE)
+            .await;
+
+        if let Err(_) = samples {
+            return;
+        }
+
+        let samples = samples.unwrap();
+
+        let found = samples
+            .iter()
+            .filter_map(|sample| {
+                if let Ok(data) = sample.data() {
+                    if data.id == self.expected_id {
+                        return Some(data);
+                    }
+                }
+                None
+            })
+            .next();
+
+        if let Some(data) = found {
+            if let Some(sender) = self.response_sender.take() {
+                sender.send(data.payload);
+            }
+        };
     }
 }

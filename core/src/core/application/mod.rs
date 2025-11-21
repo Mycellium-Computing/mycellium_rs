@@ -19,8 +19,8 @@ use crate::core::listener::ConsumerAppearListener;
 
 pub struct Application {
     name: String,
-    participant: Arc<DomainParticipantAsync<StdRuntime>>,
-    publisher: Arc<PublisherAsync<StdRuntime>>,
+    pub participant: Arc<DomainParticipantAsync<StdRuntime>>,
+    pub publisher: Arc<PublisherAsync<StdRuntime>>,
     subscriber: Arc<SubscriberAsync<StdRuntime>>,
     consumer_request_reader: Arc<DataReaderAsync<StdRuntime, ConsumerDiscovery>>,
     provider_registration_writer: Arc<DataWriterAsync<StdRuntime, ProviderMessage>>,
