@@ -7,7 +7,8 @@ use dust_dds::std_runtime::StdRuntime;
 use mycellium_computing::core::application::Application;
 use mycellium_computing::core::application::provider::ProviderTrait;
 use mycellium_computing::{consumes, provides};
-use std::env;
+use std::{env, thread};
+use std::time::Duration;
 use dust_dds::dds_async::domain_participant_factory::DomainParticipantFactoryAsync;
 
 // TODO: Allow state.
@@ -59,8 +60,9 @@ async fn provider() {
         dust_dds::infrastructure::status::NO_STATUS,
     ).await.unwrap();
 
-    for _i in 0..5 {
-        println!("Sending person_in_frame data");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    loop {
         FaceRecognition::person_in_frame(&_writer, &PersonFrameData {
             person_id: 1,
             distance: 1.5f32,

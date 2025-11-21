@@ -142,10 +142,67 @@ impl FaceRecognitionProxy {
 trait FaceRecognitionProxyContinuosTrait {
     async fn person_in_frame(data: PersonFrameData);
 } // Must be implemented by the user
+mod metrics {
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    use std::sync::OnceLock;
+
+    pub struct ThroughputMetrics {
+        bytes_counter: AtomicU64,
+        msg_counter: AtomicUsize,
+        start_time: std::sync::Mutex<Option<std::time::Instant>>,
+        reported: std::sync::atomic::AtomicBool,
+    }
+
+    impl ThroughputMetrics {
+        fn new() -> Self {
+            Self {
+                bytes_counter: AtomicU64::new(0),
+                msg_counter: AtomicUsize::new(0),
+                start_time: std::sync::Mutex::new(None),
+                reported: std::sync::atomic::AtomicBool::new(false),
+            }
+        }
+
+        pub fn record(&self, bytes: u64) {
+            self.bytes_counter.fetch_add(bytes, Ordering::Relaxed);
+            self.msg_counter.fetch_add(1, Ordering::Relaxed);
+
+            let mut start = self.start_time.lock().unwrap();
+            if start.is_none() {
+                *start = Some(std::time::Instant::now());
+                println!("Starting throughput measurement...");
+            } else if let Some(start_instant) = *start {
+                let elapsed = start_instant.elapsed();
+                if elapsed.as_secs() >= 60 && !self.reported.load(Ordering::Relaxed) {
+                    let bytes = self.bytes_counter.load(Ordering::Relaxed);
+                    let msgs = self.msg_counter.load(Ordering::Relaxed);
+                    let bytes_per_sec = bytes as f64 / elapsed.as_secs_f64();
+                    let msgs_per_sec = msgs as f64 / elapsed.as_secs_f64();
+
+                    println!(
+                        "1-minute Throughput: {:.2} KB/s, {:.2} msgs/s ({} msgs, {:.2} MB total)",
+                        bytes_per_sec / 1024.0,
+                        msgs_per_sec,
+                        msgs,
+                        bytes as f64 / (1024.0 * 1024.0)
+                    );
+                    self.reported.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+
+        pub fn instance() -> &'static Self {
+            static INSTANCE: OnceLock<ThroughputMetrics> = OnceLock::new();
+            INSTANCE.get_or_init(ThroughputMetrics::new)
+        }
+    }
+}
+
 
 impl FaceRecognitionProxyContinuosTrait for FaceRecognitionProxy {
     async fn person_in_frame(data: PersonFrameData) {
-       println!("Person in frame data received: {:?}", data);
+        let data_size = std::mem::size_of_val(&data) as u64;
+        metrics::ThroughputMetrics::instance().record(data_size);
     }
 }
 
