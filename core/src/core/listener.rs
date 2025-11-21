@@ -6,6 +6,7 @@ use dust_dds::infrastructure::type_support::{DdsDeserialize, DdsSerialize, TypeS
 use dust_dds::std_runtime::StdRuntime;
 use dust_dds::subscription::data_reader_listener::DataReaderListener;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 
 pub struct RequestListener<T, R> {
     pub writer: DataWriterAsync<StdRuntime, R>,
@@ -34,8 +35,8 @@ where
 }
 
 pub struct ConsumerAppearListener {
-    pub providers: &'static [ProviderMessage],
-    pub writer: &'static DataWriterAsync<StdRuntime, ProviderMessage>,
+    pub providers: Arc<Mutex<Vec<ProviderMessage>>>,
+    pub writer: Arc<DataWriterAsync<StdRuntime, ProviderMessage>>,
 }
 impl DataReaderListener<StdRuntime, ConsumerDiscovery> for ConsumerAppearListener {
     async fn on_data_available(&mut self, reader: DataReaderAsync<StdRuntime, ConsumerDiscovery>) {
@@ -44,9 +45,15 @@ impl DataReaderListener<StdRuntime, ConsumerDiscovery> for ConsumerAppearListene
             .await;
 
         if let Ok(data) = samples {
-            if let Ok(_) = data[0].data() {
-                for provider in self.providers {
-                    self.writer.write(provider, None).await.unwrap();
+            for sample in data {
+                if let Ok(_) = sample.data() {
+                    let providers = {
+                        let lock = self.providers.lock().unwrap();
+                        lock.clone()
+                    };
+                    for provider in providers {
+                        self.writer.write(&provider, None).await.unwrap();
+                    }
                 }
             }
         }

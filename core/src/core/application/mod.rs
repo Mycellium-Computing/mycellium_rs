@@ -1,7 +1,7 @@
 pub mod provider;
 pub mod consumer;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use dust_dds::dds_async::data_reader::DataReaderAsync;
 use dust_dds::dds_async::data_writer::DataWriterAsync;
@@ -10,12 +10,12 @@ use dust_dds::dds_async::domain_participant_factory::DomainParticipantFactoryAsy
 use dust_dds::dds_async::publisher::PublisherAsync;
 use dust_dds::dds_async::subscriber::SubscriberAsync;
 use dust_dds::infrastructure::qos::QosKind;
-use dust_dds::infrastructure::sample_info::{ANY_INSTANCE_STATE, ANY_SAMPLE_STATE, ANY_VIEW_STATE};
-use dust_dds::infrastructure::status::NO_STATUS;
+use dust_dds::infrastructure::status::{StatusKind, NO_STATUS};
 use dust_dds::listener::NO_LISTENER;
 use dust_dds::std_runtime::StdRuntime;
-use crate::core::messages::{ConsumerDiscovery, ProviderMessage, ProviderRequest};
+use crate::core::messages::{ConsumerDiscovery, ProviderMessage};
 use crate::core::application::provider::ProviderTrait;
+use crate::core::listener::ConsumerAppearListener;
 
 pub struct Application {
     name: String,
@@ -24,6 +24,7 @@ pub struct Application {
     subscriber: Arc<SubscriberAsync<StdRuntime>>,
     consumer_request_reader: Arc<DataReaderAsync<StdRuntime, ConsumerDiscovery>>,
     provider_registration_writer: Arc<DataWriterAsync<StdRuntime, ProviderMessage>>,
+    providers: Arc<Mutex<Vec<ProviderMessage>>>,
 }
 
 impl Application {
@@ -37,30 +38,17 @@ impl Application {
 
     pub async fn register_provider<T: ProviderTrait>(&mut self)
     {
-        // Registerer task
-        // TODO: Register the ProviderMessage into a Shared list that is sent by a listener over the self.consumer_request_reader
-        tokio::spawn({
-            let writer = Arc::clone(&self.provider_registration_writer);
-            let reader = Arc::clone(&self.consumer_request_reader);
+        let functionalities = T::get_functionalities();
 
-            async move {
-                let functionalities = T::get_functionalities();
-                writer.write(&functionalities, None).await.unwrap();
-                println!("Registered provider: {}", functionalities.provider_name);
+        {
+            let mut providers = self.providers.lock().unwrap();
+            providers.push(functionalities.clone());
+        }
 
-                loop {
-                    let samples = reader.take(
-                        1, ANY_SAMPLE_STATE, ANY_VIEW_STATE, ANY_INSTANCE_STATE
-                    ).await;
+        self.provider_registration_writer.write(&functionalities, None).await.unwrap();
+        println!("Registered provider: {}", functionalities.provider_name);
 
-                    if let Ok(_) = samples {
-                        writer.write(&functionalities, None).await.unwrap();
-                    }
-                }
-            }
-        });
-
-        for functionality in T::get_functionalities().functionalities {
+        for functionality in functionalities.functionalities {
             T::create_execution_objects(
                 functionality.name,
                 &self.participant,
@@ -114,10 +102,19 @@ impl Application {
             .create_datawriter::<ProviderMessage>(&provider_registration_topic, QosKind::Default, NO_LISTENER, NO_STATUS)
             .await
             .unwrap();
+        
+        let provider_registration_writer = Arc::new(provider_registration_writer);
+
+        let providers = Arc::new(Mutex::new(Vec::new()));
+
+        let listener = ConsumerAppearListener {
+            providers: providers.clone(),
+            writer: provider_registration_writer.clone(),
+        };
 
         // TODO: Define the specific QoS configuration for the reader
         let consumer_request_reader = subscriber
-            .create_datareader::<ConsumerDiscovery>(&consumer_request_topic, QosKind::Default, NO_LISTENER, NO_STATUS)
+            .create_datareader::<ConsumerDiscovery>(&consumer_request_topic, QosKind::Default, Some(listener), &[StatusKind::DataAvailable])
             .await
             .unwrap();
 
@@ -128,7 +125,8 @@ impl Application {
             publisher: Arc::new(publisher),
             subscriber: Arc::new(subscriber),
             consumer_request_reader: Arc::new(consumer_request_reader),
-            provider_registration_writer: Arc::new(provider_registration_writer),
+            provider_registration_writer,
+            providers,
         }
     }
 }
