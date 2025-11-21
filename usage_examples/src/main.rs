@@ -4,6 +4,7 @@ use crate::example_messages::face_recognition::*;
 use dust_dds::infrastructure::type_support::{DdsType};
 use dust_dds::std_runtime::StdRuntime;
 use mycellium_computing::core::application::Application;
+use mycellium_computing::core::application::provider::ProviderTrait;
 use mycellium_computing::{consumes, provides};
 use std::env;
 

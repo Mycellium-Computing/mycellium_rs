@@ -60,8 +60,10 @@ fn get_continuous_functionalities_trait_tokens(
             let name = &functionality.name;
             let output_type = &functionality.output_type;
 
+            let runtime = &functionalities.runtime;
+
             let func_tokens = quote! {
-                async fn #name(data: &#output_type);
+                async fn #name(writer: &dust_dds::dds_async::data_writer::DataWriterAsync<#runtime, #output_type>, data: &#output_type);
             };
 
             func_tokens
@@ -77,6 +79,7 @@ fn get_continuous_functionalities_trait_tokens(
 }
 
 fn get_continuous_functionalities_trait_impl_tokens(
+    runtime: &Ident,
     struct_name: &Ident,
     functionalities: &Functionalities,
     tokens: &mut proc_macro2::TokenStream,
@@ -98,8 +101,8 @@ fn get_continuous_functionalities_trait_impl_tokens(
             let output_type = &functionality.output_type;
 
             let func_tokens = quote! {
-                async fn #name(data: &#output_type) {
-                    // TODO: Decide how to send the continuous data message
+                async fn #name(writer: &dust_dds::dds_async::data_writer::DataWriterAsync<#runtime, #output_type>, data: &#output_type) {
+                    writer.write(data, None).await.unwrap();
                 }
             };
 
@@ -317,7 +320,7 @@ fn get_provider_impl_tokens(
     get_functionalities_channel_tokens(provider_name, functionalities, &mut channel_tokens);
 
     let mut continuous_trait_implementation_tokens = proc_macro2::TokenStream::new();
-    get_continuous_functionalities_trait_impl_tokens(provider_name, functionalities, &mut continuous_trait_implementation_tokens);
+    get_continuous_functionalities_trait_impl_tokens(&functionalities.runtime, provider_name, functionalities, &mut continuous_trait_implementation_tokens);
 
     let runtime = &functionalities.runtime;
 
