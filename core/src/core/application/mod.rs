@@ -16,11 +16,9 @@ use dust_dds::listener::NO_LISTENER;
 use dust_dds::std_runtime::StdRuntime;
 use crate::core::messages::{ConsumerDiscovery, ProviderMessage, ProviderRequest};
 use crate::core::application::provider::ProviderTrait;
-use crate::core::listener::RequestListener;
 
 pub struct Application {
     name: String,
-    tick_duration: Duration,
     participant: Arc<DomainParticipantAsync<StdRuntime>>,
     publisher: Arc<PublisherAsync<StdRuntime>>,
     subscriber: Arc<SubscriberAsync<StdRuntime>>,
@@ -44,7 +42,6 @@ impl Application {
         tokio::spawn({
             let writer = Arc::clone(&self.provider_registration_writer);
             let reader = Arc::clone(&self.consumer_request_reader);
-            let mut interval = tokio::time::interval(self.tick_duration);
 
             async move {
                 let functionalities = T::get_functionalities();
@@ -59,8 +56,6 @@ impl Application {
                     if let Ok(_) = samples {
                         writer.write(&functionalities, None).await.unwrap();
                     }
-
-                    interval.tick().await;
                 }
             }
         });
@@ -76,7 +71,7 @@ impl Application {
         }
     }
 
-    pub async fn new(domain_id: u32, name: &str, tick_duration: Duration) -> Self {
+    pub async fn new(domain_id: u32, name: &str) -> Self {
         let participant_factory = DomainParticipantFactoryAsync::get_instance();
 
         let participant = participant_factory
@@ -114,22 +109,21 @@ impl Application {
             .await
             .unwrap();
 
-        // TODO: Define the specific QoS configuration for the reader
-        let consumer_request_reader = subscriber
-            .create_datareader::<ConsumerDiscovery>(&consumer_request_topic, QosKind::Default, NO_LISTENER, NO_STATUS)
-            .await
-            .unwrap();
-
         // TODO: Define the specific QoS configuration for the writer
         let provider_registration_writer = publisher
             .create_datawriter::<ProviderMessage>(&provider_registration_topic, QosKind::Default, NO_LISTENER, NO_STATUS)
             .await
             .unwrap();
 
+        // TODO: Define the specific QoS configuration for the reader
+        let consumer_request_reader = subscriber
+            .create_datareader::<ConsumerDiscovery>(&consumer_request_topic, QosKind::Default, NO_LISTENER, NO_STATUS)
+            .await
+            .unwrap();
+
         // TODO: Reduce the Arc usage
         Application {
             name: name.to_string(),
-            tick_duration,
             participant: Arc::new(participant),
             publisher: Arc::new(publisher),
             subscriber: Arc::new(subscriber),

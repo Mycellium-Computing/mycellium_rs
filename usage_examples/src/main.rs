@@ -6,9 +6,6 @@ use dust_dds::std_runtime::StdRuntime;
 use mycellium_computing::core::application::Application;
 use mycellium_computing::{consumes, provides};
 use std::env;
-use std::time::Duration;
-
-const HERTZ: u32 = 360;
 
 // TODO: Allow state.
 // TODO:  (Backlog) completely decouple from StdRuntime to allow other runtimes.(To be implemented by the user)
@@ -35,8 +32,7 @@ impl FaceRecognitionProviderTrait for FaceRecognition {
 struct CalculatorProxy;
 
 async fn provider() {
-    let tick_duration = Duration::from_nanos((1_000_000_000 / HERTZ) as u64);
-    let mut app = Application::new(0, "JustASumService", tick_duration).await;
+    let mut app = Application::new(0, "JustASumService").await;
 
     app.register_provider::<FaceRecognition>().await;
 
