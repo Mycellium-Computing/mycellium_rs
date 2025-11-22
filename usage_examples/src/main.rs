@@ -10,6 +10,7 @@ use mycellium_computing::{consumes, provides};
 use std::{env, thread};
 use std::time::Duration;
 use dust_dds::dds_async::domain_participant_factory::DomainParticipantFactoryAsync;
+use rand::Rng;
 
 // TODO: Allow state.
 // TODO:  (Backlog) completely decouple from StdRuntime to allow other runtimes.(To be implemented by the user)
@@ -67,7 +68,7 @@ async fn provider() {
             person_id: 1,
             distance: 1.5f32,
             sentiment: Prediction {
-                label: "happy".to_string(),
+                label: "a".to_string(),
                 confidence: 0.95,
             },
         }).await;
