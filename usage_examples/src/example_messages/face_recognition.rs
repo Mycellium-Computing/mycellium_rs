@@ -1,6 +1,6 @@
 use dust_dds::infrastructure::type_support::DdsType;
 
-#[derive(DdsType)]
+#[derive(DdsType, Debug)]
 pub struct CameraConfig {
     pub resolution: u8,
     pub frame_rate: u8,
@@ -11,14 +11,14 @@ pub struct CameraConfig {
     pub exposure: u8,
 }
 
-#[derive(DdsType)]
+#[derive(DdsType, Debug)]
 pub struct ImageData {
     pub width: u32,
     pub height: u32,
     pub data: Vec<[u8; 3]>, // RGB pixel data
 }
 
-#[derive(DdsType)]
+#[derive(DdsType, Debug)]
 pub struct ImageDepthData {
     pub width: u32,
     pub height: u32,
@@ -38,28 +38,27 @@ pub struct PersonFrameData {
     pub sentiment: Prediction,
 }
 
-#[derive(DdsType)]
+#[derive(DdsType, Debug)]
 pub struct FaceRecognitionRequest {
     pub model: String,
     pub current_status: bool,
 }
 
-#[derive(DdsType)]
+#[derive(DdsType, Debug)]
 pub struct FaceRecognitionResponse {
     pub model: String,
     pub applied: bool,
     pub final_status: bool,
 }
 
-
-#[derive(DdsType)]
+#[derive(DdsType, Debug)]
 pub struct ModelInfo {
     pub name: String,
     pub accuracy: f32,
     pub description: String,
 }
 
-#[derive(DdsType)]
+#[derive(DdsType, Debug)]
 pub struct ModelsInfo {
     pub models: Vec<ModelInfo>,
 }

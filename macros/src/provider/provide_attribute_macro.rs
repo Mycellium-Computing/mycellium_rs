@@ -182,8 +182,7 @@ fn get_functionality_channel_tokens(
     functionality: &Functionality,
 ) -> proc_macro2::TokenStream {
     let topic_base_name = format_ident!(
-        "{}_{}",
-        provider_name.to_string(),
+        "{}",
         functionality.name.to_string()
     )
     .to_string();

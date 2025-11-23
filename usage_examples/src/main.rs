@@ -1,16 +1,13 @@
 mod example_messages;
-mod consumer_impl;
 
 use crate::example_messages::face_recognition::*;
-use dust_dds::infrastructure::type_support::{DdsType};
-use dust_dds::std_runtime::StdRuntime;
-use mycellium_computing::core::application::Application;
-use mycellium_computing::core::application::provider::ProviderTrait;
-use mycellium_computing::{consumes, provides};
-use std::{env, thread};
-use std::time::Duration;
 use dust_dds::dds_async::domain_participant_factory::DomainParticipantFactoryAsync;
-use rand::Rng;
+use dust_dds::runtime::DdsRuntime;
+use dust_dds::std_runtime::StdRuntime;
+use futures::FutureExt;
+use mycellium_computing::core::application::Application;
+use mycellium_computing::{consumes, provides};
+use std::env;
 
 // TODO: Allow state.
 // TODO:  (Backlog) completely decouple from StdRuntime to allow other runtimes.(To be implemented by the user)
@@ -33,46 +30,32 @@ impl FaceRecognitionProviderTrait for FaceRecognition {
     }
 
     async fn available_models() -> ModelsInfo {
-        ModelsInfo {
-            models: vec![]
-        }
+        ModelsInfo { models: vec![] }
     }
 }
 
+#[consumes(StdRuntime, [
+    RequestResponse("face_recognition", FaceRecognitionRequest, FaceRecognitionResponse),
+    Response("happy_face_recognition", FaceRecognitionResponse),
+    Continuous("person_in_frame", PersonFrameData)
+])]
+struct FaceRecognitionProxy;
 
+impl FaceRecognitionProxyContinuosTrait for FaceRecognitionProxy {
+    async fn person_in_frame(data: PersonFrameData) {
+        println!(
+            "Person in frame: ID={}, Distance={}, Sentiment=({:?})",
+            data.person_id, data.distance, data.sentiment
+        );
+    }
+}
 
 async fn provider() {
     let mut app = Application::new(0, "JustASumService").await;
 
     app.register_provider::<FaceRecognition>().await;
 
-    let topic = app.participant.create_topic::<PersonFrameData>(
-        "person_in_frame",
-        "PersonFrameData",
-        dust_dds::infrastructure::qos::QosKind::Default,
-        dust_dds::listener::NO_LISTENER,
-        dust_dds::infrastructure::status::NO_STATUS,
-    ).await.unwrap();
-
-    let _writer = app.publisher.create_datawriter(
-        &topic,
-        dust_dds::infrastructure::qos::QosKind::Default,
-        dust_dds::listener::NO_LISTENER,
-        dust_dds::infrastructure::status::NO_STATUS,
-    ).await.unwrap();
-
-    tokio::time::sleep(Duration::from_secs(2)).await;
-
-    loop {
-        FaceRecognition::person_in_frame(&_writer, &PersonFrameData {
-            person_id: 1,
-            distance: 1.5f32,
-            sentiment: Prediction {
-                label: "a".to_string(),
-                confidence: 0.95,
-            },
-        }).await;
-    }
+    tokio::time::sleep(core::time::Duration::from_secs(2)).await;
 
     app.run_forever().await;
 }
@@ -80,31 +63,50 @@ async fn provider() {
 async fn consumer() {
     let factory = DomainParticipantFactoryAsync::get_instance();
 
-    let participant = factory.create_participant(
-        0,
-        dust_dds::infrastructure::qos::QosKind::Default,
-        dust_dds::listener::NO_LISTENER,
-        dust_dds::infrastructure::status::NO_STATUS,
-    ).await.unwrap();
+    let participant = factory
+        .create_participant(
+            0,
+            dust_dds::infrastructure::qos::QosKind::Default,
+            dust_dds::listener::NO_LISTENER,
+            dust_dds::infrastructure::status::NO_STATUS,
+        )
+        .await
+        .unwrap();
 
-    let subscriber = participant.create_subscriber(
-        dust_dds::infrastructure::qos::QosKind::Default,
-        dust_dds::listener::NO_LISTENER,
-        dust_dds::infrastructure::status::NO_STATUS,
-    ).await.unwrap();
+    let subscriber = participant
+        .create_subscriber(
+            dust_dds::infrastructure::qos::QosKind::Default,
+            dust_dds::listener::NO_LISTENER,
+            dust_dds::infrastructure::status::NO_STATUS,
+        )
+        .await
+        .unwrap();
 
-    let publisher = participant.create_publisher(
-        dust_dds::infrastructure::qos::QosKind::Default,
-        dust_dds::listener::NO_LISTENER,
-        dust_dds::infrastructure::status::NO_STATUS,
-    ).await.unwrap();
+    let publisher = participant
+        .create_publisher(
+            dust_dds::infrastructure::qos::QosKind::Default,
+            dust_dds::listener::NO_LISTENER,
+            dust_dds::infrastructure::status::NO_STATUS,
+        )
+        .await
+        .unwrap();
 
-    let consumer = crate::consumer_impl::FaceRecognitionProxy::init(&participant, &subscriber, &publisher).await;
+    let consumer = FaceRecognitionProxy::init(&participant, &subscriber, &publisher).await;
 
     // Consumer waiting forever
 
     loop {
-        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        let res = consumer
+            .face_recognition(
+                FaceRecognitionRequest {
+                    model: "dummy".to_string(),
+                    current_status: true,
+                },
+                dust_dds::dcps::infrastructure::time::Duration::new(10, 0),
+            )
+            .await;
+
+        println!("Face recognition response: {:?}", res);
     }
 }
 
