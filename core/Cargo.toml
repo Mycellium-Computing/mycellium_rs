@@ -6,4 +6,3 @@ edition = "2024"
 [dependencies]
 dust_dds = "0.13.0"
 mycellium_computing_macros = { path = "../macros" }
-tokio = { version = "1.48.0", features = ["full"] }

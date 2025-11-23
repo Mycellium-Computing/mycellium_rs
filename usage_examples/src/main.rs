@@ -2,12 +2,17 @@ mod example_messages;
 
 use crate::example_messages::face_recognition::*;
 use dust_dds::dds_async::domain_participant_factory::DomainParticipantFactoryAsync;
-use dust_dds::runtime::DdsRuntime;
-use dust_dds::std_runtime::StdRuntime;
-use futures::FutureExt;
 use mycellium_computing::core::application::Application;
 use mycellium_computing::{consumes, provides};
+use smol::Timer;
 use std::env;
+// TODO: Import in the macros
+// Required imports
+use dust_dds::runtime::DdsRuntime;
+use futures::FutureExt;
+// Import the desired DUST DDS runtime. By default, DUST DDS provides a standard implementation.
+// The DUST DDS
+use dust_dds::std_runtime::StdRuntime;
 
 // TODO: Allow state.
 // TODO:  (Backlog) completely decouple from StdRuntime to allow other runtimes.(To be implemented by the user)
@@ -55,9 +60,11 @@ async fn provider() {
 
     app.register_provider::<FaceRecognition>().await;
 
-    tokio::time::sleep(core::time::Duration::from_secs(2)).await;
+    let sleep_fn = async |duration: core::time::Duration| {
+        Timer::after(duration).await;
+    };
 
-    app.run_forever().await;
+    app.run_forever(sleep_fn).await;
 }
 
 async fn consumer() {
@@ -110,8 +117,7 @@ async fn consumer() {
     }
 }
 
-#[tokio::main]
-async fn main() {
+async fn main_async() {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
         println!("Using as consumer");
@@ -120,4 +126,8 @@ async fn main() {
         println!("Using as provider");
         provider().await;
     }
+}
+
+fn main() {
+    smol::block_on(main_async());
 }

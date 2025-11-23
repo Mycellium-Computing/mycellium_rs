@@ -2,5 +2,6 @@
 members = [
     "core",
     "macros",
+    "tests",
     "usage_examples",
 ]
