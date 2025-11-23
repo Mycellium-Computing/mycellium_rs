@@ -1,3 +1,4 @@
+mod consumer_impl;
 mod example_messages;
 
 use crate::example_messages::face_recognition::*;
@@ -6,12 +7,8 @@ use mycellium_computing::core::application::Application;
 use mycellium_computing::{consumes, provides};
 use smol::Timer;
 use std::env;
-// TODO: Import in the macros
-// Required imports
-use dust_dds::runtime::DdsRuntime;
-use futures::FutureExt;
 // Import the desired DUST DDS runtime. By default, DUST DDS provides a standard implementation.
-// The DUST DDS
+// The DUST DDS standard runtime depends on the std library. Then is not compatible with no_std.
 use dust_dds::std_runtime::StdRuntime;
 
 // TODO: Allow state.

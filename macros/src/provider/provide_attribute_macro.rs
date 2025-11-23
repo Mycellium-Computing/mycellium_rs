@@ -12,7 +12,6 @@ fn get_functionality_trait_tokens(
     let input_type = &functionality.input_type;
     let output_type = &functionality.output_type;
 
-
     let func_tokens = if functionality.input_type.is_none() {
         quote::quote! {
             async fn #name() -> #output_type;
@@ -37,7 +36,6 @@ fn get_functionalities_trait_tokens(
         get_functionality_trait_tokens(functionality, tokens);
     }
 }
-
 
 fn get_continuous_functionalities_trait_tokens(
     struct_name: &Ident,
@@ -128,7 +126,11 @@ fn get_provider_trait_tokens(
     get_functionalities_trait_tokens(functionalities, &mut trait_tokens);
 
     let mut continuous_trait_tokens = proc_macro2::TokenStream::new();
-    get_continuous_functionalities_trait_tokens(struct_name, functionalities, &mut continuous_trait_tokens);
+    get_continuous_functionalities_trait_tokens(
+        struct_name,
+        functionalities,
+        &mut continuous_trait_tokens,
+    );
 
     quote! {
         trait #provider_trait_name {
@@ -181,11 +183,7 @@ fn get_functionality_channel_tokens(
     provider_name: &Ident,
     functionality: &Functionality,
 ) -> proc_macro2::TokenStream {
-    let topic_base_name = format_ident!(
-        "{}",
-        functionality.name.to_string()
-    )
-    .to_string();
+    let topic_base_name = format_ident!("{}", functionality.name.to_string()).to_string();
     let topic_req_name = format!("{}_Req", topic_base_name);
     let topic_res_name = format!("{}_Res", topic_base_name);
 
@@ -320,7 +318,12 @@ fn get_provider_impl_tokens(
     get_functionalities_channel_tokens(provider_name, functionalities, &mut channel_tokens);
 
     let mut continuous_trait_implementation_tokens = proc_macro2::TokenStream::new();
-    get_continuous_functionalities_trait_impl_tokens(&functionalities.runtime, provider_name, functionalities, &mut continuous_trait_implementation_tokens);
+    get_continuous_functionalities_trait_impl_tokens(
+        &functionalities.runtime,
+        provider_name,
+        functionalities,
+        &mut continuous_trait_implementation_tokens,
+    );
 
     let runtime = &functionalities.runtime;
 
@@ -350,10 +353,7 @@ pub fn apply_provide_attribute_macro(
 ) -> TokenStream {
     println!("Parsed functionalities:");
     for functionality in &functionalities.functionalities {
-        println!(
-            "- {} (kind: {:?})",
-            functionality.name, functionality.kind
-        );
+        println!("- {} (kind: {:?})", functionality.name, functionality.kind);
     }
     let struct_name = &struct_input.ident;
     let provider_trait = get_provider_trait_tokens(struct_name, functionalities);

@@ -16,9 +16,9 @@ use dust_dds::infrastructure::time::Duration;
 use dust_dds::runtime::DdsRuntime;
 use dust_dds::std_runtime::StdRuntime; // Passed as runtime in the macro
 use dust_dds::subscription::data_reader_listener::DataReaderListener;
-use futures::{FutureExt, TryFutureExt};
-use futures_timer::Delay;
 use mycellium_computing::core::messages::{EmptyMessage, ProviderExchange};
+use mycellium_computing::futures::{FutureExt, TryFutureExt};
+use mycellium_computing::futures_timer::Delay;
 
 // Every non-continuous functionality generates a writer and a reader.
 pub(crate) struct FaceRecognitionProxy {
@@ -240,16 +240,15 @@ impl FaceRecognitionProxyResponseTrait for FaceRecognitionProxy {
 
         let data_future = async { receiver.await.ok() }.fuse();
 
-        let timer_future = Delay::new(core::time::Duration::new(
-            timeout.sec() as u64,
-            timeout.nanosec(),
-        ))
+        let timer_future = mycellium_computing::futures_timer::Delay::new(
+            core::time::Duration::new(timeout.sec() as u64, timeout.nanosec()),
+        )
         .fuse();
 
-        futures::pin_mut!(data_future);
-        futures::pin_mut!(timer_future);
+        mycellium_computing::futures::pin_mut!(data_future);
+        mycellium_computing::futures::pin_mut!(timer_future);
 
-        futures::select! {
+        mycellium_computing::futures::select! {
             res = data_future => res,
             _ = timer_future => None,
         }
@@ -286,10 +285,10 @@ impl FaceRecognitionProxyResponseTrait for FaceRecognitionProxy {
         ))
         .fuse();
 
-        futures::pin_mut!(data_future);
-        futures::pin_mut!(timer_future);
+        mycellium_computing::futures::pin_mut!(data_future);
+        mycellium_computing::futures::pin_mut!(timer_future);
 
-        futures::select! {
+        mycellium_computing::futures::select! {
             res = data_future => res,
             _ = timer_future => None,
         }

@@ -1,7 +1,14 @@
 #![forbid(unsafe_code)]
 
-pub mod core;
+pub mod futures {
+    pub use futures::*;
+}
 
+pub mod futures_timer {
+    pub use futures_timer::*;
+}
+
+pub mod core;
 pub use mycellium_computing_macros::*;
 
 extern crate self as mycellium_computing;

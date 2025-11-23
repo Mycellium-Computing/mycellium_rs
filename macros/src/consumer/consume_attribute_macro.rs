@@ -1,6 +1,6 @@
 use crate::common::{Functionalities, FunctionalityKind};
 use proc_macro::TokenStream;
-use quote::{format_ident, quote, ToTokens};
+use quote::{ToTokens, format_ident, quote};
 use syn::ItemStruct;
 
 fn get_functionalities_readers_attributes(
@@ -90,7 +90,7 @@ fn get_functionalities_topics_instantiations(
                 FunctionalityKind::RequestResponse => {
                     let req_topic_name_str = format!("{}_Req", name.to_string().to_lowercase());
                     let res_topic_name_str = format!("{}_Res", name.to_string().to_lowercase());
-                    
+
                     let req_topic_var_ident = format_ident!("{}_req_topic", name.to_string().to_lowercase());
                     let res_topic_var_ident = format_ident!("{}_res_topic", name.to_string().to_lowercase());
 
@@ -242,7 +242,9 @@ fn get_functionalities_trait_definitions(
     let response_funcs: Vec<_> = functionalities
         .functionalities
         .iter()
-        .filter(|f| f.kind == FunctionalityKind::RequestResponse || f.kind == FunctionalityKind::Response)
+        .filter(|f| {
+            f.kind == FunctionalityKind::RequestResponse || f.kind == FunctionalityKind::Response
+        })
         .collect();
 
     if !response_funcs.is_empty() {
@@ -294,7 +296,9 @@ fn get_functionalities_trait_implementations(
     let response_funcs: Vec<_> = functionalities
         .functionalities
         .iter()
-        .filter(|f| f.kind == FunctionalityKind::RequestResponse || f.kind == FunctionalityKind::Response)
+        .filter(|f| {
+            f.kind == FunctionalityKind::RequestResponse || f.kind == FunctionalityKind::Response
+        })
         .collect();
 
     if !response_funcs.is_empty() {
@@ -315,6 +319,8 @@ fn get_functionalities_trait_implementations(
                             data: #input_type,
                             timeout: dust_dds::infrastructure::time::Duration,
                         ) -> Option<#output_type> {
+                            use dust_dds::runtime::DdsRuntime;
+                            use mycellium_computing::futures::FutureExt;
                             let request = mycellium_computing::core::messages::ProviderExchange {
                                 id: 0, // For now
                                 payload: data,
@@ -339,16 +345,16 @@ fn get_functionalities_trait_implementations(
 
                             let data_future = async { receiver.await.ok() }.fuse();
 
-                            let timer_future = futures_timer::Delay::new(core::time::Duration::new(
+                            let timer_future = mycellium_computing::futures_timer::Delay::new(core::time::Duration::new(
                                 timeout.sec() as u64,
                                 timeout.nanosec(),
                             ))
                             .fuse();
 
-                            futures::pin_mut!(data_future);
-                            futures::pin_mut!(timer_future);
+                            mycellium_computing::futures::pin_mut!(data_future);
+                            mycellium_computing::futures::pin_mut!(timer_future);
 
-                            futures::select! {
+                            mycellium_computing::futures::select! {
                                 res = data_future => res,
                                 _ = timer_future => None,
                             }
@@ -361,6 +367,8 @@ fn get_functionalities_trait_implementations(
                             &self,
                             timeout: dust_dds::infrastructure::time::Duration,
                         ) -> Option<#output_type> {
+                            use dust_dds::runtime::DdsRuntime;
+                            use mycellium_computing::futures::FutureExt;
                             let request = mycellium_computing::core::messages::ProviderExchange {
                                 id: 0, // For now
                                 payload: mycellium_computing::core::messages::EmptyMessage,
@@ -385,16 +393,16 @@ fn get_functionalities_trait_implementations(
 
                             let data_future = async { receiver.await.ok() }.fuse();
 
-                            let timer_future = futures_timer::Delay::new(core::time::Duration::new(
+                            let timer_future = mycellium_computing::futures_timer::Delay::new(core::time::Duration::new(
                                 timeout.sec() as u64,
                                 timeout.nanosec(),
                             ))
                             .fuse();
 
-                            futures::pin_mut!(data_future);
-                            futures::pin_mut!(timer_future);
+                            mycellium_computing::futures::pin_mut!(data_future);
+                            mycellium_computing::futures::pin_mut!(timer_future);
 
-                            futures::select! {
+                            mycellium_computing::futures::select! {
                                 res = data_future => res,
                                 _ = timer_future => None,
                             }
@@ -428,9 +436,11 @@ pub fn apply_consume_attribute_macro(
     let data_writers_attributes = get_functionalities_writers_attributes(functionalities);
 
     let data_topics_instantiations = get_functionalities_topics_instantiations(functionalities);
-    let listener_definitions = get_functionalities_listener_definitions(functionalities, struct_name);
+    let listener_definitions =
+        get_functionalities_listener_definitions(functionalities, struct_name);
     let trait_definitions = get_functionalities_trait_definitions(functionalities, struct_name);
-    let trait_implementations = get_functionalities_trait_implementations(functionalities, struct_name, &consumer_struct);
+    let trait_implementations =
+        get_functionalities_trait_implementations(functionalities, struct_name, &consumer_struct);
 
     let init_body_writers = functionalities.functionalities.iter().filter_map(|f| {
         let name = &f.name;
@@ -485,30 +495,36 @@ pub fn apply_consume_attribute_macro(
         }
     });
 
-    let init_body_continuous = functionalities.functionalities.iter().enumerate().filter_map(|(i, f)| {
-        if f.kind == FunctionalityKind::Continuous {
-            let output_type = &f.output_type;
-            let output_type_name = quote! { #output_type }.to_string();
-            let listener_name = format_ident!("{}Listener{}", output_type_name, i);
-            let topic_var_ident = format_ident!("{}_topic", f.name.to_string().to_lowercase());
-            Some(quote! {
-                subscriber
-                    .create_datareader::<#output_type>(
-                        &#topic_var_ident,
-                        dust_dds::infrastructure::qos::QosKind::Default,
-                        Some(#listener_name),
-                        &[dust_dds::infrastructure::status::StatusKind::DataAvailable],
-                    )
-                    .await
-                    .unwrap();
-            })
-        } else {
-            None
-        }
-    });
+    let init_body_continuous = functionalities
+        .functionalities
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| {
+            if f.kind == FunctionalityKind::Continuous {
+                let output_type = &f.output_type;
+                let output_type_name = quote! { #output_type }.to_string();
+                let listener_name = format_ident!("{}Listener{}", output_type_name, i);
+                let topic_var_ident = format_ident!("{}_topic", f.name.to_string().to_lowercase());
+                Some(quote! {
+                    subscriber
+                        .create_datareader::<#output_type>(
+                            &#topic_var_ident,
+                            dust_dds::infrastructure::qos::QosKind::Default,
+                            Some(#listener_name),
+                            &[dust_dds::infrastructure::status::StatusKind::DataAvailable],
+                        )
+                        .await
+                        .unwrap();
+                })
+            } else {
+                None
+            }
+        });
 
-    let struct_init_fields = functionalities.functionalities.iter().filter_map(|f| {
-         match f.kind {
+    let struct_init_fields = functionalities
+        .functionalities
+        .iter()
+        .filter_map(|f| match f.kind {
             FunctionalityKind::RequestResponse | FunctionalityKind::Response => {
                 let name = &f.name;
                 let writer_ident = format_ident!("{}_writer", name.to_string().to_lowercase());
@@ -518,9 +534,8 @@ pub fn apply_consume_attribute_macro(
                     #reader_ident
                 })
             }
-            _ => None
-        }
-    });
+            _ => None,
+        });
 
     TokenStream::from(quote! {
         struct #struct_name;

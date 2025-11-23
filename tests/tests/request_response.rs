@@ -1,9 +1,6 @@
 use dust_dds::{infrastructure::type_support::DdsType, std_runtime::StdRuntime};
 use mycellium_computing::{consumes, provides};
 
-use dust_dds::runtime::DdsRuntime;
-use futures::FutureExt;
-
 #[derive(DdsType)]
 struct ArithmeticRequest {
     a: f32,
