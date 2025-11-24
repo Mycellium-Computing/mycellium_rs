@@ -53,7 +53,8 @@ impl FaceRecognitionProxyContinuosTrait for FaceRecognitionProxy {
 }
 
 async fn provider() {
-    let mut app = Application::new(0, "JustASumService").await;
+    let factory = DomainParticipantFactoryAsync::get_instance();
+    let mut app = Application::new(0, "JustASumService", factory).await;
 
     app.register_provider::<FaceRecognition>().await;
 

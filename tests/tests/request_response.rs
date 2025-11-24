@@ -47,7 +47,8 @@ mod tests {
     #[test]
     fn test_function() {
         smol::spawn(async {
-            let mut app = Application::new(0, "test_application").await;
+            let participant_factory = DomainParticipantFactoryAsync::get_instance();
+            let mut app = Application::new(0, "test_application", participant_factory).await;
             app.register_provider::<CalculatorProvider>().await;
 
             let sleep_fn = async |duration| {

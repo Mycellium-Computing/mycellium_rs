@@ -2,15 +2,16 @@ use crate::core::messages::ProviderMessage;
 use dust_dds::dds_async::domain_participant::DomainParticipantAsync;
 use dust_dds::dds_async::publisher::PublisherAsync;
 use dust_dds::dds_async::subscriber::SubscriberAsync;
-use dust_dds::std_runtime::StdRuntime;
+use dust_dds::runtime::DdsRuntime;
 
-pub trait ProviderTrait {
+// TODO: Generalize over any disruptiveness
+pub trait ProviderTrait<R: DdsRuntime> {
     fn get_functionalities() -> ProviderMessage;
 
     fn create_execution_objects(
         functionality_name: String,
-        participant: &DomainParticipantAsync<StdRuntime>,
-        publisher: &PublisherAsync<StdRuntime>,
-        subscriber: &SubscriberAsync<StdRuntime>,
+        participant: &DomainParticipantAsync<R>,
+        publisher: &PublisherAsync<R>,
+        subscriber: &SubscriberAsync<R>,
     ) -> impl Future<Output = ()>;
 }

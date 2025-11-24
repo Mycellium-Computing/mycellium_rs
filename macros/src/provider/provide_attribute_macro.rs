@@ -328,7 +328,7 @@ fn get_provider_impl_tokens(
     let runtime = &functionalities.runtime;
 
     quote::quote! {
-        impl mycellium_computing::core::application::provider::ProviderTrait for #provider_name {
+        impl mycellium_computing::core::application::provider::ProviderTrait<#runtime> for #provider_name {
             fn get_functionalities() -> mycellium_computing::core::messages::ProviderMessage {
                 #message_tokens
             }

@@ -13,19 +13,20 @@ use dust_dds::dds_async::subscriber::SubscriberAsync;
 use dust_dds::infrastructure::qos::QosKind;
 use dust_dds::infrastructure::status::{NO_STATUS, StatusKind};
 use dust_dds::listener::NO_LISTENER;
-use dust_dds::std_runtime::StdRuntime;
+use dust_dds::runtime::DdsRuntime;
+use dust_dds::transport::interface::TransportParticipantFactory;
 
-pub struct Application {
+pub struct Application<T: DdsRuntime> {
     name: String,
-    pub participant: DomainParticipantAsync<StdRuntime>,
-    pub publisher: PublisherAsync<StdRuntime>,
-    subscriber: SubscriberAsync<StdRuntime>,
-    consumer_request_reader: DataReaderAsync<StdRuntime, ConsumerDiscovery>,
-    provider_registration_writer: DataWriterAsync<StdRuntime, ProviderMessage>,
+    pub participant: DomainParticipantAsync<T>,
+    pub publisher: PublisherAsync<T>,
+    subscriber: SubscriberAsync<T>,
+    consumer_request_reader: DataReaderAsync<T, ConsumerDiscovery>,
+    provider_registration_writer: DataWriterAsync<T, ProviderMessage>,
     providers: Vec<ProviderMessage>,
 }
 
-impl Application {
+impl<T: DdsRuntime> Application<T> {
     pub async fn run_forever<F>(&self, sleep: impl Fn(Duration) -> F)
     where
         F: Future<Output = ()>,
@@ -36,8 +37,8 @@ impl Application {
         }
     }
 
-    pub async fn register_provider<T: ProviderTrait>(&mut self) {
-        let functionalities = T::get_functionalities();
+    pub async fn register_provider<P: ProviderTrait<T>>(&mut self) {
+        let functionalities = P::get_functionalities();
 
         self.provider_registration_writer
             .write(&functionalities, None)
@@ -45,7 +46,7 @@ impl Application {
             .unwrap();
 
         for functionality in functionalities.functionalities {
-            T::create_execution_objects(
+            P::create_execution_objects(
                 functionality.name,
                 &self.participant,
                 &self.publisher,
@@ -56,9 +57,14 @@ impl Application {
         }
     }
 
-    pub async fn new(domain_id: u32, name: &str) -> Self {
-        let participant_factory = DomainParticipantFactoryAsync::get_instance();
-
+    pub async fn new(
+        domain_id: u32,
+        name: &str,
+        participant_factory: &'static DomainParticipantFactoryAsync<
+            T,
+            impl TransportParticipantFactory,
+        >,
+    ) -> Self {
         let participant = participant_factory
             .create_participant(domain_id as i32, QosKind::Default, NO_LISTENER, NO_STATUS)
             .await
