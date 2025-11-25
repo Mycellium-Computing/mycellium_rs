@@ -3,5 +3,6 @@ members = [
     "core",
     "macros",
     "tests",
+    "benchmarking",
     "usage_examples",
 ]

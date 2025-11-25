@@ -1,0 +1,18 @@
+[package]
+name = "benchmarking"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+mycellium_computing = { path = "../core" }
+dust_dds = "0.13.0"
+rand = "0.10.0-rc.5"
+smol = "2.0.2"
+
+[[bin]]
+name = "request_response_consumer"
+path = "src/request_response/consumer.rs"
+
+[[bin]]
+name = "request_response_provider"
+path = "src/request_response/provider.rs"
