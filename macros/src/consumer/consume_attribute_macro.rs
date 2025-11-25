@@ -5,7 +5,7 @@ use crate::{
 };
 use proc_macro::TokenStream;
 use quote::{ToTokens, format_ident, quote};
-use syn::ItemStruct;
+use syn::{Ident, ItemStruct, Type};
 
 fn get_functionalities_readers_attributes(
     functionalities: &Functionalities,
@@ -61,6 +61,69 @@ fn get_functionalities_writers_attributes(
         .collect()
 }
 
+fn generate_continuous_topic(name: &Ident, output_type: &Type) -> proc_macro2::TokenStream {
+    let topic_name_str = name.to_string().to_lowercase();
+    let topic_var_ident = format_ident!("{}_topic", name.to_string().to_lowercase());
+    let type_name = quote!(#output_type).to_string();
+
+    quote! {
+        let #topic_var_ident = participant.create_topic::<#output_type>(
+            #topic_name_str,
+            #type_name,
+            dust_dds::infrastructure::qos::QosKind::Default,
+            dust_dds::listener::NO_LISTENER,
+            dust_dds::infrastructure::status::NO_STATUS,
+        )
+        .await
+        .unwrap();
+    }
+}
+
+fn generate_request_response_topics(
+    name: &Ident,
+    output_type: &Type,
+    request_payload_type: proc_macro2::TokenStream,
+    input_type_for_naming: Option<&Type>,
+) -> proc_macro2::TokenStream {
+    let (topic_req_name, topic_res_name) = get_topic_names(&name.to_string());
+
+    let input_name = if input_type_for_naming.is_some() {
+        get_empty_message_type_name()
+    } else {
+        output_type.to_token_stream().to_string()
+    };
+
+    let (topic_req_type_name, topic_res_type_name) = get_request_response_topic_type_names(
+        input_name,
+        output_type.to_token_stream().to_string(),
+    );
+
+    let req_topic_var_ident = format_ident!("{}_req_topic", name.to_string().to_lowercase());
+    let res_topic_var_ident = format_ident!("{}_res_topic", name.to_string().to_lowercase());
+
+    quote! {
+        let #req_topic_var_ident = participant.create_topic::<mycellium_computing::core::messages::ProviderExchange<#request_payload_type>>(
+            #topic_req_name,
+            #topic_req_type_name,
+            dust_dds::infrastructure::qos::QosKind::Default,
+            dust_dds::listener::NO_LISTENER,
+            dust_dds::infrastructure::status::NO_STATUS,
+        )
+        .await
+        .unwrap();
+
+        let #res_topic_var_ident = participant.create_topic::<mycellium_computing::core::messages::ProviderExchange<#output_type>>(
+            #topic_res_name,
+            #topic_res_type_name,
+            dust_dds::infrastructure::qos::QosKind::Default,
+            dust_dds::listener::NO_LISTENER,
+            dust_dds::infrastructure::status::NO_STATUS,
+        )
+        .await
+        .unwrap();
+    }
+}
+
 fn get_functionalities_topics_instantiations(
     functionalities: &Functionalities,
 ) -> Vec<proc_macro2::TokenStream> {
@@ -71,195 +134,183 @@ fn get_functionalities_topics_instantiations(
             let name = &functionality.name;
             let output_type = &functionality.output_type;
 
-            println!("{}Generating consumer topic for functionality: {}{}", MACRO_MSG_PREFIX, name.to_string(), MACRO_MSG_SUFFIX);
+            println!(
+                "{}Generating consumer topic for functionality: {}{}",
+                MACRO_MSG_PREFIX,
+                name.to_string(),
+                MACRO_MSG_SUFFIX
+            );
 
             match functionality.kind {
-                FunctionalityKind::Continuous => {
-                    let topic_name_str = name.to_string().to_lowercase();
-                    let topic_var_ident = format_ident!("{}_topic", name.to_string().to_lowercase());
-                    let type_name = quote!(#output_type).to_string();
-
-                    quote! {
-                        let #topic_var_ident = participant.create_topic::<#output_type>(
-                            #topic_name_str,
-                            #type_name,
-                            dust_dds::infrastructure::qos::QosKind::Default,
-                            dust_dds::listener::NO_LISTENER,
-                            dust_dds::infrastructure::status::NO_STATUS,
-                        )
-                        .await
-                        .unwrap();
-                    }
-                }
+                FunctionalityKind::Continuous => generate_continuous_topic(name, output_type),
                 FunctionalityKind::RequestResponse => {
-                    // Names for the topic and types
-                    let (topic_req_name, topic_res_name) = get_topic_names(&name.to_string());
-
-                    let input_name = if functionality.input_type.is_some() {
-                        get_empty_message_type_name()
-                    } else {
-                        functionality.output_type.to_token_stream().to_string()
-                    };
-
-                    let (topic_req_type_name, topic_res_type_name) = get_request_response_topic_type_names(
-                        input_name,
-                        functionality.output_type.to_token_stream().to_string(),
-                    );
-
-                    // Topic variable names
-                    let req_topic_var_ident = format_ident!("{}_req_topic", name.to_string().to_lowercase());
-                    let res_topic_var_ident = format_ident!("{}_res_topic", name.to_string().to_lowercase());
-
                     let input_type = functionality.input_type.as_ref().unwrap();
-
-                    quote! {
-                        let #req_topic_var_ident = participant.create_topic::<mycellium_computing::core::messages::ProviderExchange<#input_type>>(
-                            #topic_req_name,
-                            #topic_req_type_name,
-                            dust_dds::infrastructure::qos::QosKind::Default,
-                            dust_dds::listener::NO_LISTENER,
-                            dust_dds::infrastructure::status::NO_STATUS,
-                        )
-                        .await
-                        .unwrap();
-
-                        let #res_topic_var_ident = participant.create_topic::<mycellium_computing::core::messages::ProviderExchange<#output_type>>(
-                            #topic_res_name,
-                            #topic_res_type_name,
-                            dust_dds::infrastructure::qos::QosKind::Default,
-                            dust_dds::listener::NO_LISTENER,
-                            dust_dds::infrastructure::status::NO_STATUS,
-                        )
-                        .await
-                        .unwrap();
-                    }
+                    generate_request_response_topics(
+                        name,
+                        output_type,
+                        quote!(#input_type),
+                        functionality.input_type.as_ref(),
+                    )
                 }
-                FunctionalityKind::Response => {
-                    // Names for the topic and types
-                    let (topic_req_name, topic_res_name) = get_topic_names(&name.to_string());
-
-                    let input_name = if functionality.input_type.is_some() {
-                        get_empty_message_type_name()
-                    } else {
-                        functionality.output_type.to_token_stream().to_string()
-                    };
-
-                    let (topic_req_type_name, topic_res_type_name) = get_request_response_topic_type_names(
-                        input_name,
-                        functionality.output_type.to_token_stream().to_string(),
-                    );
-
-                    let req_topic_var_ident = format_ident!("{}_req_topic", name.to_string().to_lowercase());
-                    let res_topic_var_ident = format_ident!("{}_res_topic", name.to_string().to_lowercase());
-
-                    quote! {
-                        let #req_topic_var_ident = participant.create_topic::<mycellium_computing::core::messages::ProviderExchange<mycellium_computing::core::messages::EmptyMessage>>(
-                            #topic_req_name,
-                            #topic_req_type_name,
-                            dust_dds::infrastructure::qos::QosKind::Default,
-                            dust_dds::listener::NO_LISTENER,
-                            dust_dds::infrastructure::status::NO_STATUS,
-                        )
-                        .await
-                        .unwrap();
-
-                        let #res_topic_var_ident = participant.create_topic::<mycellium_computing::core::messages::ProviderExchange<#output_type>>(
-                            #topic_res_name,
-                            #topic_res_type_name,
-                            dust_dds::infrastructure::qos::QosKind::Default,
-                            dust_dds::listener::NO_LISTENER,
-                            dust_dds::infrastructure::status::NO_STATUS,
-                        )
-                        .await
-                        .unwrap();
-                    }
-                }
+                FunctionalityKind::Response => generate_request_response_topics(
+                    name,
+                    output_type,
+                    quote!(mycellium_computing::core::messages::EmptyMessage),
+                    functionality.input_type.as_ref(),
+                ),
             }
         })
         .collect()
 }
 
-fn get_functionalities_listener_definitions(
+fn generate_continuous_listener(
+    struct_name: &Ident,
+    runtime: &Ident,
+    output_type: &Type,
+    func_name: &Ident,
+    index: usize,
+) -> proc_macro2::TokenStream {
+    let output_type_name = quote! { #output_type }.to_string();
+    let listener_name = format_ident!("{}Listener{}", output_type_name, index);
+
+    quote! {
+        struct #listener_name;
+        impl dust_dds::subscription::data_reader_listener::DataReaderListener<#runtime, #output_type> for #listener_name {
+            async fn on_data_available(
+                &mut self,
+                reader: dust_dds::dds_async::data_reader::DataReaderAsync<#runtime, #output_type>,
+            ) {
+                let samples = reader
+                    .take(
+                        100, // TODO: Allow the user to specify the number of samples to take
+                        dust_dds::infrastructure::sample_info::ANY_SAMPLE_STATE,
+                        dust_dds::infrastructure::sample_info::ANY_VIEW_STATE,
+                        dust_dds::infrastructure::sample_info::ANY_INSTANCE_STATE,
+                    )
+                    .await;
+
+                if let Ok(data) = samples {
+                    for sample in &data {
+                        if let Ok(data) = sample.data() {
+                            #struct_name::#func_name(data).await;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn get_functionalities_listeners(
+    struct_name: &Ident,
     functionalities: &Functionalities,
-    struct_name: &syn::Ident,
 ) -> Vec<proc_macro2::TokenStream> {
     let runtime = &functionalities.runtime;
+
     functionalities
         .functionalities
         .iter()
         .enumerate()
-        .filter_map(|(i, functionality)| {
-            if functionality.kind == FunctionalityKind::Continuous {
-                let output_type = &functionality.output_type;
-                let output_type_name = quote! { #output_type }.to_string();
-                let listener_name = format_ident!("{}Listener{}", output_type_name, i);
-                let output_type = &functionality.output_type;
-                let func_name = &functionality.name;
-
-                Some(quote! {
-                    struct #listener_name;
-                    impl dust_dds::subscription::data_reader_listener::DataReaderListener<#runtime, #output_type> for #listener_name {
-                        async fn on_data_available(
-                            &mut self,
-                            reader: dust_dds::dds_async::data_reader::DataReaderAsync<#runtime, #output_type>,
-                        ) {
-                            let samples = reader
-                                .take(
-                                    100,
-                                    dust_dds::infrastructure::sample_info::ANY_SAMPLE_STATE,
-                                    dust_dds::infrastructure::sample_info::ANY_VIEW_STATE,
-                                    dust_dds::infrastructure::sample_info::ANY_INSTANCE_STATE,
-                                )
-                                .await;
-
-                            if let Ok(data) = samples {
-                                for sample in &data {
-                                    if let Ok(data) = sample.data() {
-                                        #struct_name::#func_name(data).await;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                })
-            } else {
-                None
-            }
+        .filter(|(_, f)| f.kind == FunctionalityKind::Continuous)
+        .map(|(i, functionality)| {
+            generate_continuous_listener(
+                struct_name,
+                runtime,
+                &functionality.output_type,
+                &functionality.name,
+                i,
+            )
         })
         .collect()
 }
 
-fn get_functionalities_trait_definitions(
-    functionalities: &Functionalities,
-    struct_name: &syn::Ident,
-) -> Vec<proc_macro2::TokenStream> {
-    let mut traits = Vec::new();
+fn generate_request_response_trait_method(
+    name: &Ident,
+    input_type: &Type,
+    output_type: &Type,
+) -> proc_macro2::TokenStream {
+    quote! {
+        async fn #name(
+            &self,
+            data: #input_type,
+            timeout: dust_dds::infrastructure::time::Duration,
+        ) -> Option<#output_type>;
+    }
+}
 
-    // Continuous Trait
+fn generate_response_trait_method(name: &Ident, output_type: &Type) -> proc_macro2::TokenStream {
+    quote! {
+        async fn #name(
+            &self,
+            timeout: dust_dds::infrastructure::time::Duration,
+        ) -> Option<#output_type>;
+    }
+}
+
+fn generate_continuous_trait(
+    struct_name: &Ident,
+    continuous_funcs: &[&Functionality],
+) -> Option<proc_macro2::TokenStream> {
+    if continuous_funcs.is_empty() {
+        return None;
+    }
+
+    let trait_name = format_ident!("{}ContinuosTrait", struct_name);
+    let methods = continuous_funcs.iter().map(|f| {
+        let name = &f.name;
+        let output_type = &f.output_type;
+        quote! {
+            async fn #name(data: #output_type);
+        }
+    });
+
+    Some(quote! {
+        trait #trait_name {
+            #(#methods)*
+        }
+    })
+}
+
+fn generate_response_trait(
+    struct_name: &Ident,
+    response_funcs: &[&Functionality],
+) -> Option<proc_macro2::TokenStream> {
+    if response_funcs.is_empty() {
+        return None;
+    }
+
+    let trait_name = format_ident!("{}ResponseTrait", struct_name);
+    let methods = response_funcs.iter().map(|f| {
+        let name = &f.name;
+        let output_type = &f.output_type;
+
+        match f.kind {
+            FunctionalityKind::RequestResponse => {
+                let input_type = f.input_type.as_ref().unwrap();
+                generate_request_response_trait_method(name, input_type, output_type)
+            }
+            FunctionalityKind::Response => generate_response_trait_method(name, output_type),
+            _ => unreachable!(),
+        }
+    });
+
+    Some(quote! {
+        trait #trait_name {
+            #(#methods)*
+        }
+    })
+}
+
+fn get_functionalities_trait_definitions(
+    struct_name: &Ident,
+    functionalities: &Functionalities,
+) -> Vec<proc_macro2::TokenStream> {
     let continuous_funcs: Vec<_> = functionalities
         .functionalities
         .iter()
         .filter(|f| f.kind == FunctionalityKind::Continuous)
         .collect();
 
-    if !continuous_funcs.is_empty() {
-        let trait_name = format_ident!("{}ContinuosTrait", struct_name);
-        let methods = continuous_funcs.iter().map(|f| {
-            let name = &f.name;
-            let output_type = &f.output_type;
-            quote! {
-                async fn #name(data: #output_type);
-            }
-        });
-
-        traits.push(quote! {
-            trait #trait_name {
-                #(#methods)*
-            }
-        });
-    }
-
-    // Response Trait
     let response_funcs: Vec<_> = functionalities
         .functionalities
         .iter()
@@ -268,52 +319,120 @@ fn get_functionalities_trait_definitions(
         })
         .collect();
 
-    if !response_funcs.is_empty() {
-        let trait_name = format_ident!("{}ResponseTrait", struct_name);
-        let methods = response_funcs.iter().map(|f| {
-            let name = &f.name;
-            let output_type = &f.output_type;
-            match f.kind {
-                FunctionalityKind::RequestResponse => {
-                    let input_type = f.input_type.as_ref().unwrap();
-                    quote! {
-                        async fn #name(
-                            &self,
-                            data: #input_type,
-                            timeout: dust_dds::infrastructure::time::Duration,
-                        ) -> Option<#output_type>;
-                    }
-                }
-                FunctionalityKind::Response => {
-                    quote! {
-                        async fn #name(
-                            &self,
-                            timeout: dust_dds::infrastructure::time::Duration,
-                        ) -> Option<#output_type>;
-                    }
-                }
-                _ => unreachable!(),
-            }
-        });
+    [
+        generate_continuous_trait(struct_name, &continuous_funcs),
+        generate_response_trait(struct_name, &response_funcs),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
 
-        traits.push(quote! {
-            trait #trait_name {
-                #(#methods)*
-            }
-        });
+fn generate_response_wait_logic(
+    writer_ident: &Ident,
+    reader_ident: &Ident,
+    runtime: &Ident,
+    output_type: &Type,
+) -> proc_macro2::TokenStream {
+    quote! {
+        let (sender, receiver) = #runtime::oneshot::<#output_type>();
+
+        let listener = mycellium_computing::core::listener::ProviderResponseListener {
+            expected_id: request.id,
+            response_sender: Some(sender),
+        };
+
+        self.#reader_ident
+            .set_listener(Some(listener), &[dust_dds::infrastructure::status::StatusKind::DataAvailable])
+            .await
+            .unwrap();
+
+        self.#writer_ident
+            .write(&request, None)
+            .await
+            .unwrap();
+
+        let data_future = async { receiver.await.ok() }.fuse();
+
+        let timer_future = mycellium_computing::futures_timer::Delay::new(core::time::Duration::new(
+            timeout.sec() as u64,
+            timeout.nanosec(),
+        ))
+        .fuse();
+
+        mycellium_computing::futures::pin_mut!(data_future);
+        mycellium_computing::futures::pin_mut!(timer_future);
+
+        mycellium_computing::futures::select! {
+            res = data_future => res,
+            _ = timer_future => None,
+        }
     }
+}
 
-    traits
+fn generate_request_response_method(
+    name: &Ident,
+    input_type: &Type,
+    output_type: &Type,
+    writer_ident: &Ident,
+    reader_ident: &Ident,
+    runtime: &Ident,
+) -> proc_macro2::TokenStream {
+    let wait_logic = generate_response_wait_logic(writer_ident, reader_ident, runtime, output_type);
+
+    quote! {
+        async fn #name(
+            &self,
+            data: #input_type,
+            timeout: dust_dds::infrastructure::time::Duration,
+        ) -> Option<#output_type> {
+            println!("Sending request");
+
+            use dust_dds::runtime::DdsRuntime;
+            use mycellium_computing::futures::FutureExt;
+
+            let request = mycellium_computing::core::messages::ProviderExchange {
+                id: 0, // For now
+                payload: data,
+            };
+
+            #wait_logic
+        }
+    }
+}
+
+fn generate_response_method(
+    name: &Ident,
+    output_type: &Type,
+    writer_ident: &Ident,
+    reader_ident: &Ident,
+    runtime: &Ident,
+) -> proc_macro2::TokenStream {
+    let wait_logic = generate_response_wait_logic(writer_ident, reader_ident, runtime, output_type);
+
+    quote! {
+        async fn #name(
+            &self,
+            timeout: dust_dds::infrastructure::time::Duration,
+        ) -> Option<#output_type> {
+            use dust_dds::runtime::DdsRuntime;
+            use mycellium_computing::futures::FutureExt;
+
+            let request = mycellium_computing::core::messages::ProviderExchange {
+                id: 0, // TODO: Use dynamic ID generation
+                payload: mycellium_computing::core::messages::EmptyMessage,
+            };
+
+            #wait_logic
+        }
+    }
 }
 
 fn get_functionalities_trait_implementations(
+    struct_name: &Ident,
     functionalities: &Functionalities,
-    struct_name: &syn::Ident,
-    consumer_struct: &syn::Ident,
+    consumer_struct: &Ident,
 ) -> Vec<proc_macro2::TokenStream> {
-    let mut impls = Vec::new();
-
-    // Response Trait Implementation
     let response_funcs: Vec<_> = functionalities
         .functionalities
         .iter()
@@ -323,152 +442,67 @@ fn get_functionalities_trait_implementations(
         .collect();
 
     if response_funcs.is_empty() {
-        return impls;
+        return Vec::new();
     }
 
     let trait_name = format_ident!("{}ResponseTrait", struct_name);
+    let runtime = &functionalities.runtime;
 
     let methods = response_funcs.iter().map(|f| {
         let name = &f.name;
         let output_type = &f.output_type;
         let writer_ident = format_ident!("{}_writer", name.to_string().to_lowercase());
         let reader_ident = format_ident!("{}_reader", name.to_string().to_lowercase());
-        let runtime = &functionalities.runtime;
 
         match f.kind {
             FunctionalityKind::RequestResponse => {
                 let input_type = f.input_type.as_ref().unwrap();
-                quote! {
-                    async fn #name(
-                        &self,
-                        data: #input_type,
-                        timeout: dust_dds::infrastructure::time::Duration,
-                    ) -> Option<#output_type> {
-                        println!("Sending request");
-
-                        use dust_dds::runtime::DdsRuntime;
-                        use mycellium_computing::futures::FutureExt;
-                        let request = mycellium_computing::core::messages::ProviderExchange {
-                            id: 0, // For now
-                            payload: data,
-                        };
-
-                        let (sender, receiver) = #runtime::oneshot::<#output_type>();
-
-                        let listener = mycellium_computing::core::listener::ProviderResponseListener {
-                            expected_id: request.id,
-                            response_sender: Some(sender),
-                        };
-
-                        self.#reader_ident
-                            .set_listener(Some(listener), &[dust_dds::infrastructure::status::StatusKind::DataAvailable])
-                            .await
-                            .unwrap();
-
-                        self.#writer_ident
-                            .write(&request, None)
-                            .await
-                            .unwrap();
-
-                        let data_future = async { receiver.await.ok() }.fuse();
-
-                        let timer_future = mycellium_computing::futures_timer::Delay::new(core::time::Duration::new(
-                            timeout.sec() as u64,
-                            timeout.nanosec(),
-                        ))
-                        .fuse();
-
-                        mycellium_computing::futures::pin_mut!(data_future);
-                        mycellium_computing::futures::pin_mut!(timer_future);
-
-                        mycellium_computing::futures::select! {
-                            res = data_future => res,
-                            _ = timer_future => None,
-                        }
-                    }
-                }
+                generate_request_response_method(
+                    name,
+                    input_type,
+                    output_type,
+                    &writer_ident,
+                    &reader_ident,
+                    runtime,
+                )
             }
             FunctionalityKind::Response => {
-                quote! {
-                    async fn #name(
-                        &self,
-                        timeout: dust_dds::infrastructure::time::Duration,
-                    ) -> Option<#output_type> {
-                        use dust_dds::runtime::DdsRuntime;
-                        use mycellium_computing::futures::FutureExt;
-                        let request = mycellium_computing::core::messages::ProviderExchange {
-                            id: 0, // For now
-                            payload: mycellium_computing::core::messages::EmptyMessage,
-                        };
-
-                        let (sender, receiver) = #runtime::oneshot::<#output_type>();
-
-                        let listener = mycellium_computing::core::listener::ProviderResponseListener {
-                            expected_id: request.id,
-                            response_sender: Some(sender),
-                        };
-
-                        self.#reader_ident
-                            .set_listener(Some(listener), &[dust_dds::infrastructure::status::StatusKind::DataAvailable])
-                            .await
-                            .unwrap();
-
-                        self.#writer_ident
-                            .write(&request, None)
-                            .await
-                            .unwrap();
-
-                        let data_future = async { receiver.await.ok() }.fuse();
-
-                        let timer_future = mycellium_computing::futures_timer::Delay::new(core::time::Duration::new(
-                            timeout.sec() as u64,
-                            timeout.nanosec(),
-                        ))
-                        .fuse();
-
-                        mycellium_computing::futures::pin_mut!(data_future);
-                        mycellium_computing::futures::pin_mut!(timer_future);
-
-                        mycellium_computing::futures::select! {
-                            res = data_future => res,
-                            _ = timer_future => None,
-                        }
-                    }
-                }
+                generate_response_method(name, output_type, &writer_ident, &reader_ident, runtime)
             }
             _ => unreachable!(),
         }
     });
 
-    impls.push(quote! {
+    vec![quote! {
         impl #trait_name for #consumer_struct {
             #(#methods)*
         }
-    });
-
-    impls
+    }]
 }
 
-pub fn apply_consume_attribute_macro(
+fn get_consumer_struct<'a>(
+    struct_name: &Ident,
     functionalities: &Functionalities,
-    struct_input: &ItemStruct,
-) -> TokenStream {
-    let struct_name = &struct_input.ident;
-    let runtime = &functionalities.runtime;
-
+) -> (Ident, proc_macro2::TokenStream) {
     let consumer_struct = format_ident!("{}Consumer", struct_name);
 
     let data_readers_attributes = get_functionalities_readers_attributes(functionalities);
     let data_writers_attributes = get_functionalities_writers_attributes(functionalities);
 
-    let data_topics_instantiations = get_functionalities_topics_instantiations(functionalities);
-    let listener_definitions =
-        get_functionalities_listener_definitions(functionalities, struct_name);
-    let trait_definitions = get_functionalities_trait_definitions(functionalities, struct_name);
-    let trait_implementations =
-        get_functionalities_trait_implementations(functionalities, struct_name, &consumer_struct);
+    (
+        consumer_struct.clone(),
+        quote::quote! {
+            struct #consumer_struct {
+                #(#data_readers_attributes),*,
+                #(#data_writers_attributes),*
+            }
+        },
+    )
+}
 
-    let init_body_writers = functionalities.functionalities.iter().filter_map(|f| {
+#[inline(always)]
+fn get_init_body_writers(funtionalities: &Functionalities) -> Vec<proc_macro2::TokenStream> {
+    funtionalities.functionalities.iter().filter_map(|f| {
         let name = &f.name;
         match f.kind {
             FunctionalityKind::RequestResponse | FunctionalityKind::Response => {
@@ -495,9 +529,13 @@ pub fn apply_consume_attribute_macro(
             }
             _ => None
         }
-    });
+    })
+    .collect()
+}
 
-    let init_body_readers = functionalities.functionalities.iter().filter_map(|f| {
+#[inline(always)]
+fn get_init_body_readers(functionalities: &Functionalities) -> Vec<proc_macro2::TokenStream> {
+    functionalities.functionalities.iter().filter_map(|f| {
         let name = &f.name;
         match f.kind {
             FunctionalityKind::RequestResponse | FunctionalityKind::Response => {
@@ -519,9 +557,13 @@ pub fn apply_consume_attribute_macro(
             }
             _ => None
         }
-    });
+    })
+    .collect()
+}
 
-    let init_body_continuous = functionalities
+#[inline(always)]
+fn get_init_body_continuous(functionalities: &Functionalities) -> Vec<proc_macro2::TokenStream> {
+    functionalities
         .functionalities
         .iter()
         .enumerate()
@@ -545,9 +587,13 @@ pub fn apply_consume_attribute_macro(
             } else {
                 None
             }
-        });
+        })
+        .collect()
+}
 
-    let struct_init_fields = functionalities
+#[inline(always)]
+fn get_struct_init_fields(functionalities: &Functionalities) -> Vec<proc_macro2::TokenStream> {
+    functionalities
         .functionalities
         .iter()
         .filter_map(|f| match f.kind {
@@ -561,38 +607,75 @@ pub fn apply_consume_attribute_macro(
                 })
             }
             _ => None,
-        });
+        })
+        .collect()
+}
 
-    TokenStream::from(quote! {
-        struct #struct_name;
+#[inline(always)]
+fn get_consumer_struct_impl(
+    struct_name: &Ident,
+    functionalities: &Functionalities,
+    consumer_struct_name: &Ident,
+) -> proc_macro2::TokenStream {
+    let runtime = &functionalities.runtime;
 
-        struct #consumer_struct {
-            #(#data_readers_attributes),*,
-            #(#data_writers_attributes),*
-        }
+    let data_topics_instantiations = get_functionalities_topics_instantiations(functionalities);
+    let init_body_writers = get_init_body_writers(functionalities);
+    let init_body_readers = get_init_body_readers(functionalities);
+    let init_body_continuous = get_init_body_continuous(functionalities);
+    let struct_init_fields = get_struct_init_fields(functionalities);
 
-        #(#listener_definitions)*
-
-        #(#trait_definitions)*
-
-        #(#trait_implementations)*
-
+    quote! {
         impl #struct_name {
             async fn init(
                 participant: &dust_dds::dds_async::domain_participant::DomainParticipantAsync<#runtime>,
                 subscriber: &dust_dds::dds_async::subscriber::SubscriberAsync<#runtime>,
                 publisher: &dust_dds::dds_async::publisher::PublisherAsync<#runtime>,
-            ) -> #consumer_struct {
+            ) -> #consumer_struct_name {
                 #(#data_topics_instantiations)*
 
                 #(#init_body_writers)*
                 #(#init_body_readers)*
                 #(#init_body_continuous)*
 
-                #consumer_struct {
+                #consumer_struct_name {
                     #(#struct_init_fields),*
                 }
             }
         }
-    })
+    }
+}
+
+pub fn apply_consume_attribute_macro(
+    functionalities: &Functionalities,
+    struct_input: &ItemStruct,
+) -> TokenStream {
+    let struct_name = &struct_input.ident;
+
+    let (consumer_struct_name, consumer_struct) = get_consumer_struct(struct_name, functionalities);
+    let listeners = get_functionalities_listeners(struct_name, functionalities);
+    let trait_definitions = get_functionalities_trait_definitions(struct_name, functionalities);
+    let trait_implementations = get_functionalities_trait_implementations(
+        struct_name,
+        functionalities,
+        &consumer_struct_name,
+    );
+    let consumer_struct_impl =
+        get_consumer_struct_impl(struct_name, functionalities, &consumer_struct_name);
+
+    let expanded = quote::quote! {
+        struct #struct_name;
+
+        #consumer_struct
+
+        #(#listeners)*
+
+        #(#trait_definitions)*
+
+        #(#trait_implementations)*
+
+        #consumer_struct_impl
+    };
+
+    TokenStream::from(expanded)
 }
