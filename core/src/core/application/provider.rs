@@ -1,4 +1,5 @@
 use crate::core::messages::ProviderMessage;
+use crate::utils::storage::ExecutionObjects;
 use dust_dds::dds_async::domain_participant::DomainParticipantAsync;
 use dust_dds::dds_async::publisher::PublisherAsync;
 use dust_dds::dds_async::subscriber::SubscriberAsync;
@@ -13,5 +14,6 @@ pub trait ProviderTrait<R: DdsRuntime> {
         participant: &DomainParticipantAsync<R>,
         publisher: &PublisherAsync<R>,
         subscriber: &SubscriberAsync<R>,
+        storage: &mut ExecutionObjects,
     ) -> impl Future<Output = ()>;
 }

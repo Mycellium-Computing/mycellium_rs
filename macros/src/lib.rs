@@ -8,6 +8,9 @@ use crate::provider::provide_attribute_macro::apply_provide_attribute_macro;
 use proc_macro::TokenStream;
 use syn::{ItemStruct, parse_macro_input};
 
+const MACRO_MSG_PREFIX: &str = "\t\x1b[1m\x1b[38;2;33;188;255m[MACRO] ";
+const MACRO_MSG_SUFFIX: &str = "\x1b[0m";
+
 #[proc_macro_attribute]
 pub fn provides(attr: TokenStream, item: TokenStream) -> TokenStream {
     let functionalities = parse_macro_input!(attr as Functionalities);

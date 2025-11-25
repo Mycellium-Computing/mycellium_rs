@@ -46,6 +46,7 @@ where
     T: TypeSupport + XTypesSerialize + for<'a> XTypesDeserialize<'a> + Send + Sync + 'static,
 {
     async fn on_data_available(&mut self, reader: DataReaderAsync<R, ProviderExchange<T>>) {
+        println!("RECEIVED SOMEHITNG HEREEEEEE!!");
         let samples = reader
             .take(1, ANY_SAMPLE_STATE, ANY_VIEW_STATE, ANY_INSTANCE_STATE)
             .await;

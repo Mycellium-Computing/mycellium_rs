@@ -46,8 +46,6 @@ impl Parse for Functionality {
         // Parse the content inside the parentheses
         let content;
         syn::parenthesized!(content in input);
-        
-        println!("{:?}", content.to_string());
 
         let name_lit: syn::LitStr = content.parse()?;
         content.parse::<Token![,]>()?;

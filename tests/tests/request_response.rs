@@ -19,6 +19,7 @@ struct CalculatorProvider;
 
 impl CalculatorProviderProviderTrait for CalculatorProvider {
     async fn add_two_ints(request: ArithmeticRequest) -> Number {
+        println!("Adding {} and {}", request.a, request.b);
         Number {
             value: request.a + request.b,
         }
@@ -32,11 +33,9 @@ struct CalculatorConsumer;
 
 #[cfg(test)]
 mod tests {
-    use dust_dds::{
-        dds_async::domain_participant_factory::DomainParticipantFactoryAsync,
-        infrastructure::{qos_policy::QosPolicy, sample_info::ANY_SAMPLE_STATE, status::NO_STATUS},
-    };
-    use futures::FutureExt;
+    use std::time::Duration;
+
+    use dust_dds::dds_async::domain_participant_factory::DomainParticipantFactoryAsync;
     use mycellium_computing::core::application::Application;
     use smol::Timer;
 
@@ -46,25 +45,22 @@ mod tests {
 
     #[test]
     fn test_function() {
-        smol::spawn(async {
-            let participant_factory = DomainParticipantFactoryAsync::get_instance();
-            let mut app = Application::new(0, "test_application", participant_factory).await;
-            app.register_provider::<CalculatorProvider>().await;
+        let handle = std::thread::spawn(|| {
+            smol::block_on(async {
+                let participant_factory = DomainParticipantFactoryAsync::get_instance();
+                let mut app = Application::new(150, "test_application", participant_factory).await;
+                app.register_provider::<CalculatorProvider>().await;
 
-            let sleep_fn = async |duration| {
-                Timer::after(duration).await;
-            };
-
-            app.run_forever(sleep_fn).await;
-        })
-        .detach();
+                Timer::after(Duration::new(2, 0)).await;
+            });
+        });
 
         smol::block_on(async {
             let factory = DomainParticipantFactoryAsync::get_instance();
 
             let participant = factory
                 .create_participant(
-                    0,
+                    150,
                     dust_dds::infrastructure::qos::QosKind::Default,
                     dust_dds::listener::NO_LISTENER,
                     dust_dds::infrastructure::status::NO_STATUS,
@@ -98,12 +94,17 @@ mod tests {
             let result = consumer
                 .add_two_ints(
                     request,
-                    dust_dds::dcps::infrastructure::time::Duration::new(1, 0),
+                    dust_dds::dcps::infrastructure::time::Duration::new(2, 0),
                 )
                 .await
                 .unwrap();
 
-            assert_eq!(result.value, expected_result);
+            assert_eq!(
+                result.value, expected_result,
+                "The provider responded with an incorrect result"
+            );
         });
+
+        handle.join().unwrap();
     }
 }

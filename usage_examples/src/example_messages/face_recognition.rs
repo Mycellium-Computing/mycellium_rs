@@ -1,31 +1,6 @@
 use dust_dds::infrastructure::type_support::DdsType;
 
 #[derive(DdsType, Debug)]
-pub struct CameraConfig {
-    pub resolution: u8,
-    pub frame_rate: u8,
-    pub color_mode: u8,
-    pub saturation: u8,
-    pub brightness: u8,
-    pub contrast: u8,
-    pub exposure: u8,
-}
-
-#[derive(DdsType, Debug)]
-pub struct ImageData {
-    pub width: u32,
-    pub height: u32,
-    pub data: Vec<[u8; 3]>, // RGB pixel data
-}
-
-#[derive(DdsType, Debug)]
-pub struct ImageDepthData {
-    pub width: u32,
-    pub height: u32,
-    pub data: Vec<f32>, // Depth values in meters
-}
-
-#[derive(DdsType, Debug)]
 pub struct Prediction {
     pub label: String,
     pub confidence: f32,

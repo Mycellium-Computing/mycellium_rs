@@ -1,6 +1,9 @@
-use crate::common::{Functionalities, FunctionalityKind};
+use crate::{
+    MACRO_MSG_PREFIX, MACRO_MSG_SUFFIX,
+    common::{Functionalities, FunctionalityKind},
+};
 use proc_macro::TokenStream;
-use quote::{ToTokens, format_ident, quote};
+use quote::{format_ident, quote};
 use syn::ItemStruct;
 
 fn get_functionalities_readers_attributes(
@@ -67,7 +70,7 @@ fn get_functionalities_topics_instantiations(
             let name = &functionality.name;
             let output_type = &functionality.output_type;
 
-            println!("[CONSUMER MACRO] Generating topic for functionality: {}", name.to_string());
+            println!("{}Generating consumer topic for functionality: {}{}", MACRO_MSG_PREFIX, name.to_string(), MACRO_MSG_SUFFIX);
 
             match functionality.kind {
                 FunctionalityKind::Continuous => {
@@ -301,124 +304,129 @@ fn get_functionalities_trait_implementations(
         })
         .collect();
 
-    if !response_funcs.is_empty() {
-        let trait_name = format_ident!("{}ResponseTrait", struct_name);
-        let methods = response_funcs.iter().map(|f| {
-            let name = &f.name;
-            let output_type = &f.output_type;
-            let writer_ident = format_ident!("{}_writer", name.to_string().to_lowercase());
-            let reader_ident = format_ident!("{}_reader", name.to_string().to_lowercase());
-            let runtime = &functionalities.runtime;
-
-            match f.kind {
-                FunctionalityKind::RequestResponse => {
-                    let input_type = f.input_type.as_ref().unwrap();
-                    quote! {
-                        async fn #name(
-                            &self,
-                            data: #input_type,
-                            timeout: dust_dds::infrastructure::time::Duration,
-                        ) -> Option<#output_type> {
-                            use dust_dds::runtime::DdsRuntime;
-                            use mycellium_computing::futures::FutureExt;
-                            let request = mycellium_computing::core::messages::ProviderExchange {
-                                id: 0, // For now
-                                payload: data,
-                            };
-
-                            let (sender, receiver) = #runtime::oneshot::<#output_type>();
-
-                            let listener = mycellium_computing::core::listener::ProviderResponseListener {
-                                expected_id: request.id,
-                                response_sender: Some(sender),
-                            };
-
-                            self.#reader_ident
-                                .set_listener(Some(listener), &[dust_dds::infrastructure::status::StatusKind::DataAvailable])
-                                .await
-                                .unwrap();
-
-                            self.#writer_ident
-                                .write(&request, None)
-                                .await
-                                .unwrap();
-
-                            let data_future = async { receiver.await.ok() }.fuse();
-
-                            let timer_future = mycellium_computing::futures_timer::Delay::new(core::time::Duration::new(
-                                timeout.sec() as u64,
-                                timeout.nanosec(),
-                            ))
-                            .fuse();
-
-                            mycellium_computing::futures::pin_mut!(data_future);
-                            mycellium_computing::futures::pin_mut!(timer_future);
-
-                            mycellium_computing::futures::select! {
-                                res = data_future => res,
-                                _ = timer_future => None,
-                            }
-                        }
-                    }
-                }
-                FunctionalityKind::Response => {
-                    quote! {
-                        async fn #name(
-                            &self,
-                            timeout: dust_dds::infrastructure::time::Duration,
-                        ) -> Option<#output_type> {
-                            use dust_dds::runtime::DdsRuntime;
-                            use mycellium_computing::futures::FutureExt;
-                            let request = mycellium_computing::core::messages::ProviderExchange {
-                                id: 0, // For now
-                                payload: mycellium_computing::core::messages::EmptyMessage,
-                            };
-
-                            let (sender, receiver) = #runtime::oneshot::<#output_type>();
-
-                            let listener = mycellium_computing::core::listener::ProviderResponseListener {
-                                expected_id: request.id,
-                                response_sender: Some(sender),
-                            };
-
-                            self.#reader_ident
-                                .set_listener(Some(listener), &[dust_dds::infrastructure::status::StatusKind::DataAvailable])
-                                .await
-                                .unwrap();
-
-                            self.#writer_ident
-                                .write(&request, None)
-                                .await
-                                .unwrap();
-
-                            let data_future = async { receiver.await.ok() }.fuse();
-
-                            let timer_future = mycellium_computing::futures_timer::Delay::new(core::time::Duration::new(
-                                timeout.sec() as u64,
-                                timeout.nanosec(),
-                            ))
-                            .fuse();
-
-                            mycellium_computing::futures::pin_mut!(data_future);
-                            mycellium_computing::futures::pin_mut!(timer_future);
-
-                            mycellium_computing::futures::select! {
-                                res = data_future => res,
-                                _ = timer_future => None,
-                            }
-                        }
-                    }
-                }
-                _ => unreachable!(),
-            }
-        });
-
-        impls.push(quote! {
-            impl #trait_name for #consumer_struct {
-                #(#methods)*
-            }
-        });
+    if response_funcs.is_empty() {
+        return impls;
     }
+
+    let trait_name = format_ident!("{}ResponseTrait", struct_name);
+
+    let methods = response_funcs.iter().map(|f| {
+        let name = &f.name;
+        let output_type = &f.output_type;
+        let writer_ident = format_ident!("{}_writer", name.to_string().to_lowercase());
+        let reader_ident = format_ident!("{}_reader", name.to_string().to_lowercase());
+        let runtime = &functionalities.runtime;
+
+        match f.kind {
+            FunctionalityKind::RequestResponse => {
+                let input_type = f.input_type.as_ref().unwrap();
+                quote! {
+                    async fn #name(
+                        &self,
+                        data: #input_type,
+                        timeout: dust_dds::infrastructure::time::Duration,
+                    ) -> Option<#output_type> {
+                        println!("Sending request");
+
+                        use dust_dds::runtime::DdsRuntime;
+                        use mycellium_computing::futures::FutureExt;
+                        let request = mycellium_computing::core::messages::ProviderExchange {
+                            id: 0, // For now
+                            payload: data,
+                        };
+
+                        let (sender, receiver) = #runtime::oneshot::<#output_type>();
+
+                        let listener = mycellium_computing::core::listener::ProviderResponseListener {
+                            expected_id: request.id,
+                            response_sender: Some(sender),
+                        };
+
+                        self.#reader_ident
+                            .set_listener(Some(listener), &[dust_dds::infrastructure::status::StatusKind::DataAvailable])
+                            .await
+                            .unwrap();
+
+                        self.#writer_ident
+                            .write(&request, None)
+                            .await
+                            .unwrap();
+
+                        let data_future = async { receiver.await.ok() }.fuse();
+
+                        let timer_future = mycellium_computing::futures_timer::Delay::new(core::time::Duration::new(
+                            timeout.sec() as u64,
+                            timeout.nanosec(),
+                        ))
+                        .fuse();
+
+                        mycellium_computing::futures::pin_mut!(data_future);
+                        mycellium_computing::futures::pin_mut!(timer_future);
+
+                        mycellium_computing::futures::select! {
+                            res = data_future => res,
+                            _ = timer_future => None,
+                        }
+                    }
+                }
+            }
+            FunctionalityKind::Response => {
+                quote! {
+                    async fn #name(
+                        &self,
+                        timeout: dust_dds::infrastructure::time::Duration,
+                    ) -> Option<#output_type> {
+                        use dust_dds::runtime::DdsRuntime;
+                        use mycellium_computing::futures::FutureExt;
+                        let request = mycellium_computing::core::messages::ProviderExchange {
+                            id: 0, // For now
+                            payload: mycellium_computing::core::messages::EmptyMessage,
+                        };
+
+                        let (sender, receiver) = #runtime::oneshot::<#output_type>();
+
+                        let listener = mycellium_computing::core::listener::ProviderResponseListener {
+                            expected_id: request.id,
+                            response_sender: Some(sender),
+                        };
+
+                        self.#reader_ident
+                            .set_listener(Some(listener), &[dust_dds::infrastructure::status::StatusKind::DataAvailable])
+                            .await
+                            .unwrap();
+
+                        self.#writer_ident
+                            .write(&request, None)
+                            .await
+                            .unwrap();
+
+                        let data_future = async { receiver.await.ok() }.fuse();
+
+                        let timer_future = mycellium_computing::futures_timer::Delay::new(core::time::Duration::new(
+                            timeout.sec() as u64,
+                            timeout.nanosec(),
+                        ))
+                        .fuse();
+
+                        mycellium_computing::futures::pin_mut!(data_future);
+                        mycellium_computing::futures::pin_mut!(timer_future);
+
+                        mycellium_computing::futures::select! {
+                            res = data_future => res,
+                            _ = timer_future => None,
+                        }
+                    }
+                }
+            }
+            _ => unreachable!(),
+        }
+    });
+
+    impls.push(quote! {
+        impl #trait_name for #consumer_struct {
+            #(#methods)*
+        }
+    });
 
     impls
 }

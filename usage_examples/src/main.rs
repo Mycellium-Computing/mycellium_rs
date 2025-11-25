@@ -1,11 +1,9 @@
-mod consumer_impl;
 mod example_messages;
 
 use crate::example_messages::face_recognition::*;
 use dust_dds::dds_async::domain_participant_factory::DomainParticipantFactoryAsync;
 use mycellium_computing::core::application::Application;
 use mycellium_computing::{consumes, provides};
-use smol::Timer;
 use std::env;
 // Import the desired DUST DDS runtime. By default, DUST DDS provides a standard implementation.
 // The DUST DDS standard runtime depends on the std library. Then is not compatible with no_std.
@@ -23,7 +21,7 @@ struct FaceRecognition;
 
 // Callbacks implementing the provider functionality
 impl FaceRecognitionProviderTrait for FaceRecognition {
-    async fn face_recognition(input: FaceRecognitionRequest) -> FaceRecognitionResponse {
+    async fn face_recognition(_input: FaceRecognitionRequest) -> FaceRecognitionResponse {
         FaceRecognitionResponse {
             model: "dummy".to_string(),
             applied: true,
@@ -58,11 +56,7 @@ async fn provider() {
 
     app.register_provider::<FaceRecognition>().await;
 
-    let sleep_fn = async |duration: core::time::Duration| {
-        Timer::after(duration).await;
-    };
-
-    app.run_forever(sleep_fn).await;
+    app.run_forever().await;
 }
 
 async fn consumer() {

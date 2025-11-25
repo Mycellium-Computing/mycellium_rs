@@ -3,7 +3,7 @@ pub mod provider;
 
 use crate::core::application::provider::ProviderTrait;
 use crate::core::messages::{ConsumerDiscovery, ProviderMessage};
-use core::time::Duration;
+use crate::utils::storage::ExecutionObjects;
 use dust_dds::dds_async::data_reader::DataReaderAsync;
 use dust_dds::dds_async::data_writer::DataWriterAsync;
 use dust_dds::dds_async::domain_participant::DomainParticipantAsync;
@@ -21,20 +21,16 @@ pub struct Application<T: DdsRuntime> {
     pub participant: DomainParticipantAsync<T>,
     pub publisher: PublisherAsync<T>,
     subscriber: SubscriberAsync<T>,
-    consumer_request_reader: DataReaderAsync<T, ConsumerDiscovery>,
+    pub consumer_request_reader: DataReaderAsync<T, ConsumerDiscovery>,
     provider_registration_writer: DataWriterAsync<T, ProviderMessage>,
-    providers: Vec<ProviderMessage>,
+    pub providers: Vec<ProviderMessage>,
+    objects_storage: ExecutionObjects,
 }
 
 impl<T: DdsRuntime> Application<T> {
-    pub async fn run_forever<F>(&self, sleep: impl Fn(Duration) -> F)
-    where
-        F: Future<Output = ()>,
-    {
+    pub async fn run_forever(&self) {
         println!("{} is waiting forever", self.name);
-        loop {
-            sleep(Duration::from_secs(10)).await;
-        }
+        core::future::pending::<()>().await;
     }
 
     pub async fn register_provider<P: ProviderTrait<T>>(&mut self) {
@@ -51,8 +47,10 @@ impl<T: DdsRuntime> Application<T> {
                 &self.participant,
                 &self.publisher,
                 &self.subscriber,
+                &mut self.objects_storage,
             )
             .await;
+
             // TODO: Should return the writer, reader, topic and listener maybe? I suspect that not returning them and somehow maintaining those references alive will kill the service due to rust reference drop
         }
     }
@@ -126,6 +124,8 @@ impl<T: DdsRuntime> Application<T> {
             .await
             .unwrap();
 
+        let objects_storage = ExecutionObjects::new();
+
         Application {
             name: name.to_string(),
             participant,
@@ -134,6 +134,7 @@ impl<T: DdsRuntime> Application<T> {
             consumer_request_reader,
             provider_registration_writer,
             providers,
+            objects_storage,
         }
     }
 }

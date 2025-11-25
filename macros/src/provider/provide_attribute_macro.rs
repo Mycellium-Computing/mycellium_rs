@@ -1,4 +1,7 @@
-use crate::common::{Functionalities, Functionality, FunctionalityKind};
+use crate::{
+    MACRO_MSG_PREFIX, MACRO_MSG_SUFFIX,
+    common::{Functionalities, Functionality, FunctionalityKind},
+};
 use proc_macro::TokenStream;
 use quote::{ToTokens, format_ident, quote};
 use syn::{Ident, ItemStruct};
@@ -183,27 +186,31 @@ fn get_functionality_channel_tokens(
     provider_name: &Ident,
     functionality: &Functionality,
 ) -> proc_macro2::TokenStream {
-    let topic_base_name = format_ident!("{}", functionality.name.to_string()).to_string();
+    let topic_base_name = functionality.name.to_string().to_lowercase();
     let topic_req_name = format!("{}_Req", topic_base_name);
     let topic_res_name = format!("{}_Res", topic_base_name);
 
-    println!("Generating topics for service {}", topic_base_name);
+    println!(
+        "{}Generating provider topics for service {}{}",
+        MACRO_MSG_PREFIX, topic_base_name, MACRO_MSG_SUFFIX
+    );
 
     let name_ident = &functionality.name;
     let input_type = if functionality.input_type.is_none() {
         quote::quote! {
-            mycellium_computing::core::messages::ProviderExchange::<mycellium_computing::core::messages::EmptyMessage>
+            mycellium_computing::core::messages::ProviderExchange<mycellium_computing::core::messages::EmptyMessage>
         }
     } else {
         let provider_input_type = functionality.input_type.as_ref().unwrap();
         quote::quote! {
-            mycellium_computing::core::messages::ProviderExchange::<#provider_input_type>
+            mycellium_computing::core::messages::ProviderExchange<#provider_input_type>
         }
     };
     let output_type = &functionality.output_type;
 
     let topic_req_input_type_name = input_type.to_token_stream().to_string();
-    let topic_res_output_type_name = output_type.to_token_stream().to_string();
+    let response_type = quote!(mycellium_computing::core::messages::ProviderExchange<#output_type>);
+    let topic_res_output_type_name = response_type.to_token_stream().to_string();
 
     let topic_tokens = quote! {
         let request_topic = participant.create_topic::<#input_type>(
@@ -217,7 +224,7 @@ fn get_functionality_channel_tokens(
             .unwrap();
 
 
-        let response_topic = participant.create_topic::<#output_type>(
+        let response_topic = participant.create_topic::<mycellium_computing::core::messages::ProviderExchange<#output_type>>(
             #topic_res_name,
             #topic_res_output_type_name,
             dust_dds::infrastructure::qos::QosKind::Default,
@@ -240,7 +247,7 @@ fn get_functionality_channel_tokens(
     };
 
     let writer_tokens = quote! {
-        let writer = publisher.create_datawriter::<#output_type>(
+        let writer = publisher.create_datawriter::<mycellium_computing::core::messages::ProviderExchange<#output_type>>(
             &response_topic,
             dust_dds::infrastructure::qos::QosKind::Default,
             dust_dds::listener::NO_LISTENER,
@@ -255,7 +262,11 @@ fn get_functionality_channel_tokens(
             writer,
             implementation: Box::new(|request: #input_type| {
                 Box::pin(async move {
-                    #method_call
+                    let result = #method_call;
+                    mycellium_computing::core::messages::ProviderExchange {
+                        id: request.id,
+                        payload: result,
+                    }
                 })
             }),
         };
@@ -284,6 +295,10 @@ fn get_functionality_channel_tokens(
             #writer_tokens
 
             #reader_tokens
+
+            storage.save(request_topic);
+            storage.save(response_topic);
+            storage.save(reader);
         }
     }
 }
@@ -337,7 +352,8 @@ fn get_provider_impl_tokens(
                 functionality_name: String,
                 participant: &dust_dds::dds_async::domain_participant::DomainParticipantAsync<#runtime>,
                 publisher: &dust_dds::dds_async::publisher::PublisherAsync<#runtime>,
-                subscriber: &dust_dds::dds_async::subscriber::SubscriberAsync<#runtime>
+                subscriber: &dust_dds::dds_async::subscriber::SubscriberAsync<#runtime>,
+                storage: &mut mycellium_computing::utils::storage::ExecutionObjects,
             ) {
                 #channel_tokens
             }
@@ -351,10 +367,6 @@ pub fn apply_provide_attribute_macro(
     functionalities: &Functionalities,
     struct_input: &ItemStruct,
 ) -> TokenStream {
-    println!("Parsed functionalities:");
-    for functionality in &functionalities.functionalities {
-        println!("- {} (kind: {:?})", functionality.name, functionality.kind);
-    }
     let struct_name = &struct_input.ident;
     let provider_trait = get_provider_trait_tokens(struct_name, functionalities);
     let provider_impl = get_provider_impl_tokens(&struct_name, functionalities);
