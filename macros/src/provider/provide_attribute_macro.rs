@@ -1,6 +1,7 @@
 use crate::{
     MACRO_MSG_PREFIX, MACRO_MSG_SUFFIX,
     common::{Functionalities, Functionality, FunctionalityKind},
+    naming::{get_empty_message_type_name, get_request_response_topic_type_names, get_topic_names},
 };
 use proc_macro::TokenStream;
 use quote::{ToTokens, format_ident, quote};
@@ -186,36 +187,42 @@ fn get_functionality_channel_tokens(
     provider_name: &Ident,
     functionality: &Functionality,
 ) -> proc_macro2::TokenStream {
-    let topic_base_name = functionality.name.to_string().to_lowercase();
-    let topic_req_name = format!("{}_Req", topic_base_name);
-    let topic_res_name = format!("{}_Res", topic_base_name);
+    // Names for the topic and types
+    let (topic_req_name, topic_res_name) = get_topic_names(&functionality.name.to_string());
+
+    let input_name = if functionality.input_type.is_some() {
+        get_empty_message_type_name()
+    } else {
+        functionality.output_type.to_token_stream().to_string()
+    };
+
+    let (request_topic_type_name, response_topic_type_name) = get_request_response_topic_type_names(
+        input_name,
+        functionality.output_type.to_token_stream().to_string(),
+    );
 
     println!(
         "{}Generating provider topics for service {}{}",
-        MACRO_MSG_PREFIX, topic_base_name, MACRO_MSG_SUFFIX
+        MACRO_MSG_PREFIX, &functionality.name, MACRO_MSG_SUFFIX
     );
 
     let name_ident = &functionality.name;
     let input_type = if functionality.input_type.is_none() {
         quote::quote! {
-            mycellium_computing::core::messages::ProviderExchange<mycellium_computing::core::messages::EmptyMessage>
+            mycellium_computing::core::messages::EmptyMessage
         }
     } else {
         let provider_input_type = functionality.input_type.as_ref().unwrap();
         quote::quote! {
-            mycellium_computing::core::messages::ProviderExchange<#provider_input_type>
+            #provider_input_type
         }
     };
     let output_type = &functionality.output_type;
 
-    let topic_req_input_type_name = input_type.to_token_stream().to_string();
-    let response_type = quote!(mycellium_computing::core::messages::ProviderExchange<#output_type>);
-    let topic_res_output_type_name = response_type.to_token_stream().to_string();
-
     let topic_tokens = quote! {
-        let request_topic = participant.create_topic::<#input_type>(
+        let request_topic = participant.create_topic::<mycellium_computing::core::messages::ProviderExchange<#input_type>>(
             #topic_req_name,
-            #topic_req_input_type_name,
+            #request_topic_type_name,
             dust_dds::infrastructure::qos::QosKind::Default,
             dust_dds::listener::NO_LISTENER,
             dust_dds::infrastructure::status::NO_STATUS,
@@ -226,7 +233,7 @@ fn get_functionality_channel_tokens(
 
         let response_topic = participant.create_topic::<mycellium_computing::core::messages::ProviderExchange<#output_type>>(
             #topic_res_name,
-            #topic_res_output_type_name,
+            #response_topic_type_name,
             dust_dds::infrastructure::qos::QosKind::Default,
             dust_dds::listener::NO_LISTENER,
             dust_dds::infrastructure::status::NO_STATUS,
@@ -260,7 +267,7 @@ fn get_functionality_channel_tokens(
     let listener_tokens = quote! {
         let listener = mycellium_computing::core::listener::RequestListener {
             writer,
-            implementation: Box::new(|request: #input_type| {
+            implementation: Box::new(|request: mycellium_computing::core::messages::ProviderExchange<#input_type>| {
                 Box::pin(async move {
                     let result = #method_call;
                     mycellium_computing::core::messages::ProviderExchange {
@@ -276,7 +283,7 @@ fn get_functionality_channel_tokens(
         #listener_tokens
 
 
-        let reader = subscriber.create_datareader::<#input_type>(
+        let reader = subscriber.create_datareader::<mycellium_computing::core::messages::ProviderExchange<#input_type>>(
             &request_topic,
             dust_dds::infrastructure::qos::QosKind::Default,
             Some(listener),

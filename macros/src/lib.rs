@@ -1,5 +1,6 @@
 mod common;
 mod consumer;
+mod naming;
 mod provider;
 
 use crate::common::Functionalities;

@@ -1,9 +1,10 @@
 use crate::{
     MACRO_MSG_PREFIX, MACRO_MSG_SUFFIX,
-    common::{Functionalities, FunctionalityKind},
+    common::{Functionalities, Functionality, FunctionalityKind},
+    naming::{get_empty_message_type_name, get_request_response_topic_type_names, get_topic_names},
 };
 use proc_macro::TokenStream;
-use quote::{format_ident, quote};
+use quote::{ToTokens, format_ident, quote};
 use syn::ItemStruct;
 
 fn get_functionalities_readers_attributes(
@@ -66,7 +67,7 @@ fn get_functionalities_topics_instantiations(
     functionalities
         .functionalities
         .iter()
-        .map(|functionality| {
+        .map(|functionality: &Functionality| {
             let name = &functionality.name;
             let output_type = &functionality.output_type;
 
@@ -91,21 +92,30 @@ fn get_functionalities_topics_instantiations(
                     }
                 }
                 FunctionalityKind::RequestResponse => {
-                    let req_topic_name_str = format!("{}_Req", name.to_string().to_lowercase());
-                    let res_topic_name_str = format!("{}_Res", name.to_string().to_lowercase());
+                    // Names for the topic and types
+                    let (topic_req_name, topic_res_name) = get_topic_names(&name.to_string());
 
+                    let input_name = if functionality.input_type.is_some() {
+                        get_empty_message_type_name()
+                    } else {
+                        functionality.output_type.to_token_stream().to_string()
+                    };
+
+                    let (topic_req_type_name, topic_res_type_name) = get_request_response_topic_type_names(
+                        input_name,
+                        functionality.output_type.to_token_stream().to_string(),
+                    );
+
+                    // Topic variable names
                     let req_topic_var_ident = format_ident!("{}_req_topic", name.to_string().to_lowercase());
                     let res_topic_var_ident = format_ident!("{}_res_topic", name.to_string().to_lowercase());
 
                     let input_type = functionality.input_type.as_ref().unwrap();
 
-                    let req_type_name = quote!(mycellium_computing::core::messages::ProviderExchange<#input_type>).to_string();
-                    let res_type_name = quote!(mycellium_computing::core::messages::ProviderExchange<#output_type>).to_string();
-
                     quote! {
                         let #req_topic_var_ident = participant.create_topic::<mycellium_computing::core::messages::ProviderExchange<#input_type>>(
-                            #req_topic_name_str,
-                            #req_type_name,
+                            #topic_req_name,
+                            #topic_req_type_name,
                             dust_dds::infrastructure::qos::QosKind::Default,
                             dust_dds::listener::NO_LISTENER,
                             dust_dds::infrastructure::status::NO_STATUS,
@@ -114,8 +124,8 @@ fn get_functionalities_topics_instantiations(
                         .unwrap();
 
                         let #res_topic_var_ident = participant.create_topic::<mycellium_computing::core::messages::ProviderExchange<#output_type>>(
-                            #res_topic_name_str,
-                            #res_type_name,
+                            #topic_res_name,
+                            #topic_res_type_name,
                             dust_dds::infrastructure::qos::QosKind::Default,
                             dust_dds::listener::NO_LISTENER,
                             dust_dds::infrastructure::status::NO_STATUS,
@@ -125,19 +135,27 @@ fn get_functionalities_topics_instantiations(
                     }
                 }
                 FunctionalityKind::Response => {
-                    let req_topic_name_str = format!("{}_Req", name.to_string().to_lowercase());
-                    let res_topic_name_str = format!("{}_Res", name.to_string().to_lowercase());
+                    // Names for the topic and types
+                    let (topic_req_name, topic_res_name) = get_topic_names(&name.to_string());
+
+                    let input_name = if functionality.input_type.is_some() {
+                        get_empty_message_type_name()
+                    } else {
+                        functionality.output_type.to_token_stream().to_string()
+                    };
+
+                    let (topic_req_type_name, topic_res_type_name) = get_request_response_topic_type_names(
+                        input_name,
+                        functionality.output_type.to_token_stream().to_string(),
+                    );
 
                     let req_topic_var_ident = format_ident!("{}_req_topic", name.to_string().to_lowercase());
                     let res_topic_var_ident = format_ident!("{}_res_topic", name.to_string().to_lowercase());
 
-                    let req_type_name = quote!(mycellium_computing::core::messages::ProviderExchange<mycellium_computing::core::messages::EmptyMessage>).to_string();
-                    let res_type_name = quote!(mycellium_computing::core::messages::ProviderExchange<#output_type>).to_string();
-
                     quote! {
                         let #req_topic_var_ident = participant.create_topic::<mycellium_computing::core::messages::ProviderExchange<mycellium_computing::core::messages::EmptyMessage>>(
-                            #req_topic_name_str,
-                            #req_type_name,
+                            #topic_req_name,
+                            #topic_req_type_name,
                             dust_dds::infrastructure::qos::QosKind::Default,
                             dust_dds::listener::NO_LISTENER,
                             dust_dds::infrastructure::status::NO_STATUS,
@@ -146,8 +164,8 @@ fn get_functionalities_topics_instantiations(
                         .unwrap();
 
                         let #res_topic_var_ident = participant.create_topic::<mycellium_computing::core::messages::ProviderExchange<#output_type>>(
-                            #res_topic_name_str,
-                            #res_type_name,
+                            #topic_res_name,
+                            #topic_res_type_name,
                             dust_dds::infrastructure::qos::QosKind::Default,
                             dust_dds::listener::NO_LISTENER,
                             dust_dds::infrastructure::status::NO_STATUS,
