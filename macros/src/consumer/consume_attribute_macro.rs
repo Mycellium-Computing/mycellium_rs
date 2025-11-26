@@ -386,8 +386,6 @@ fn generate_request_response_method(
             data: #input_type,
             timeout: dust_dds::infrastructure::time::Duration,
         ) -> Option<#output_type> {
-            println!("Sending request");
-
             use dust_dds::runtime::DdsRuntime;
             use mycellium_computing::futures::FutureExt;
 
