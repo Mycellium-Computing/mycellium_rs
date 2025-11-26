@@ -11,6 +11,7 @@ smol = "2.0.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sysinfo = "0.32"
+nokhwa = { version = "0.10", features = ["input-native"] }
 
 [[bin]]
 name = "request_response_consumer"
@@ -19,3 +20,15 @@ path = "src/request_response/consumer.rs"
 [[bin]]
 name = "request_response_provider"
 path = "src/request_response/provider.rs"
+
+[[bin]]
+name = "continuous_consumer"
+path = "src/continuous/consumer.rs"
+
+[[bin]]
+name = "continuous_provider"
+path = "src/continuous/provider.rs"
+
+[[bin]]
+name = "camera_provider"
+path = "src/camera/camera.rs"

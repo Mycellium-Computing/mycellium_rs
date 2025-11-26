@@ -1,9 +1,10 @@
 #[path = "../common/mod.rs"]
 mod common;
 
-use common::types::{
-    BenchmarkConfig, BenchmarkRequest, BenchmarkResponse, BenchmarkResults, SystemMetricsSample,
-    current_timestamp_ns, parse_config_from_args,
+use common::continuous_types::{
+    ContinuousBenchmarkConfig, ContinuousBenchmarkResults, ContinuousData,
+    ContinuousSystemMetricsSample, continuous_current_timestamp_ns,
+    parse_continuous_config_from_args,
 };
 use dust_dds::dds_async::domain_participant_factory::DomainParticipantFactoryAsync;
 use dust_dds::std_runtime::StdRuntime;
@@ -11,44 +12,25 @@ use mycellium_computing::core::application::Application;
 use mycellium_computing::provides;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use sysinfo::{Pid, ProcessesToUpdate, System};
 
 /// Global state for tracking provider metrics
-static REQUESTS_RECEIVED: AtomicU64 = AtomicU64::new(0);
-static REQUESTS_PROCESSED: AtomicU64 = AtomicU64::new(0);
-static TOTAL_BYTES_PROCESSED: AtomicU64 = AtomicU64::new(0);
+static MESSAGES_PUBLISHED: AtomicU64 = AtomicU64::new(0);
+static TOTAL_BYTES_PUBLISHED: AtomicU64 = AtomicU64::new(0);
 
-/// Provider implementation for benchmarking
+/// Provider implementation for continuous benchmarking
+/// The continuous handle will be used to publish data
 #[provides(StdRuntime, [
-    RequestResponse("benchmark_request", BenchmarkRequest, BenchmarkResponse)
+    Continuous("benchmark_stream", ContinuousData)
 ])]
-struct BenchmarkProvider;
+struct ContinuousBenchmarkProvider;
 
-impl BenchmarkProviderProviderTrait for BenchmarkProvider {
-    async fn benchmark_request(request: BenchmarkRequest) -> BenchmarkResponse {
-        REQUESTS_RECEIVED.fetch_add(1, Ordering::SeqCst);
-
-        // Track bytes processed for accurate throughput calculation
-        let payload_len = request.payload.len() as u64;
-        TOTAL_BYTES_PROCESSED.fetch_add(payload_len, Ordering::SeqCst);
-
-        // Create response with same payload size
-        let response = BenchmarkResponse {
-            request_id: request.request_id,
-            request_timestamp_ns: request.timestamp_ns,
-            response_timestamp_ns: current_timestamp_ns(),
-            payload_size: request.payload_size,
-            payload: request.payload, // Echo back the payload
-        };
-
-        REQUESTS_PROCESSED.fetch_add(1, Ordering::SeqCst);
-        response
-    }
-}
+// No trait implementation needed for continuous-only providers
+// The data is published via the ContinuousHandle
 
 /// Collect system metrics sample
-fn collect_system_metrics(sys: &mut System, pid: Pid) -> SystemMetricsSample {
+fn collect_system_metrics(sys: &mut System, pid: Pid) -> ContinuousSystemMetricsSample {
     sys.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
     sys.refresh_memory();
 
@@ -62,8 +44,8 @@ fn collect_system_metrics(sys: &mut System, pid: Pid) -> SystemMetricsSample {
         0.0
     };
 
-    SystemMetricsSample {
-        timestamp_ns: current_timestamp_ns(),
+    ContinuousSystemMetricsSample {
+        timestamp_ns: continuous_current_timestamp_ns(),
         cpu_usage_percent: cpu_usage,
         memory_usage_bytes: memory_usage,
         total_memory_bytes: total_memory,
@@ -73,8 +55,8 @@ fn collect_system_metrics(sys: &mut System, pid: Pid) -> SystemMetricsSample {
 
 /// Metrics collector task
 fn start_metrics_collector(
-    config: &BenchmarkConfig,
-    samples: Arc<Mutex<Vec<SystemMetricsSample>>>,
+    config: &ContinuousBenchmarkConfig,
+    samples: Arc<Mutex<Vec<ContinuousSystemMetricsSample>>>,
     running: Arc<AtomicBool>,
 ) {
     let interval_ms = config.metrics_sample_interval_ms;
@@ -97,13 +79,68 @@ fn start_metrics_collector(
     });
 }
 
-async fn run_provider(config: BenchmarkConfig) {
+/// Generate payload of specified size
+fn generate_payload(size: u32) -> Vec<u8> {
+    (0..size).map(|i| (i % 256) as u8).collect()
+}
+
+/// Rate limiter to achieve target PPS (publications per second)
+struct RateLimiter {
+    target_pps: u64,
+    interval_ns: u64,
+    last_publish_time: Instant,
+    tokens: f64,
+}
+
+impl RateLimiter {
+    fn new(target_pps: u64) -> Self {
+        let interval_ns = if target_pps > 0 {
+            1_000_000_000 / target_pps
+        } else {
+            0
+        };
+        Self {
+            target_pps,
+            interval_ns,
+            last_publish_time: Instant::now(),
+            tokens: 1.0,
+        }
+    }
+
+    async fn wait_for_token(&mut self) {
+        if self.target_pps == 0 {
+            // Unlimited rate
+            return;
+        }
+
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last_publish_time);
+
+        // Add tokens based on elapsed time
+        let tokens_to_add = elapsed.as_secs_f64() * self.target_pps as f64;
+        self.tokens = (self.tokens + tokens_to_add).min(self.target_pps as f64);
+        self.last_publish_time = now;
+
+        if self.tokens >= 1.0 {
+            self.tokens -= 1.0;
+        } else {
+            // Wait for next token
+            let wait_time_ns = self.interval_ns as f64 * (1.0 - self.tokens);
+            smol::Timer::after(Duration::from_nanos(wait_time_ns as u64)).await;
+            self.tokens = 0.0;
+            self.last_publish_time = Instant::now();
+        }
+    }
+}
+
+async fn run_provider(config: ContinuousBenchmarkConfig) {
     println!("===========================================");
-    println!("  Request-Response Benchmark - PROVIDER");
+    println!("    Continuous Benchmark - PROVIDER");
     println!("===========================================");
     println!("Configuration:");
     println!("  Domain ID: {}", config.domain_id);
     println!("  Duration: {} seconds", config.duration_secs);
+    println!("  Target PPS: {} (0 = unlimited)", config.target_pps);
     println!("  Payload size: {} bytes", config.payload_size);
     println!(
         "  Metrics sample interval: {} ms",
@@ -114,37 +151,41 @@ async fn run_provider(config: BenchmarkConfig) {
 
     // Initialize DDS
     let factory = DomainParticipantFactoryAsync::get_instance();
-    let mut app = Application::new(config.domain_id, "BenchmarkProvider", factory).await;
+    let mut app = Application::new(config.domain_id, "ContinuousBenchmarkProvider", factory).await;
 
-    // Register provider
-    app.register_provider::<BenchmarkProvider>().await;
-    println!("[Provider] Registered and ready to serve requests");
+    // Register provider and get the continuous handle for publishing
+    let continuous_handle = app.register_provider::<ContinuousBenchmarkProvider>().await;
+    println!("[Provider] Registered and ready to publish data");
+
+    // Wait for consumers to connect
+    println!("[Provider] Waiting for consumers (3 seconds)...");
+    smol::Timer::after(Duration::from_secs(3)).await;
 
     // Initialize metrics collection
-    let samples: Arc<Mutex<Vec<SystemMetricsSample>>> = Arc::new(Mutex::new(Vec::new()));
+    let samples: Arc<Mutex<Vec<ContinuousSystemMetricsSample>>> = Arc::new(Mutex::new(Vec::new()));
     let running = Arc::new(AtomicBool::new(true));
 
     // Start metrics collector
     start_metrics_collector(&config, samples.clone(), running.clone());
 
     // Record start time
-    let start_time_ns = current_timestamp_ns();
+    let start_time_ns = continuous_current_timestamp_ns();
+    let benchmark_start = Instant::now();
     println!(
         "[Provider] Benchmark started at timestamp: {}",
         start_time_ns
     );
 
     // Reset counters
-    REQUESTS_RECEIVED.store(0, Ordering::SeqCst);
-    REQUESTS_PROCESSED.store(0, Ordering::SeqCst);
-    TOTAL_BYTES_PROCESSED.store(0, Ordering::SeqCst);
+    MESSAGES_PUBLISHED.store(0, Ordering::SeqCst);
+    TOTAL_BYTES_PUBLISHED.store(0, Ordering::SeqCst);
 
     // Progress reporting task
     let duration_secs = config.duration_secs;
     let progress_running = running.clone();
     let progress_handle = std::thread::spawn(move || {
         let start = std::time::Instant::now();
-        let mut last_requests = 0u64;
+        let mut last_published = 0u64;
         let mut last_bytes = 0u64;
         let mut last_time = start;
 
@@ -152,13 +193,13 @@ async fn run_provider(config: BenchmarkConfig) {
             std::thread::sleep(Duration::from_secs(1));
 
             let elapsed = start.elapsed().as_secs();
-            let current_requests = REQUESTS_PROCESSED.load(Ordering::SeqCst);
-            let current_bytes = TOTAL_BYTES_PROCESSED.load(Ordering::SeqCst);
+            let current_published = MESSAGES_PUBLISHED.load(Ordering::SeqCst);
+            let current_bytes = TOTAL_BYTES_PUBLISHED.load(Ordering::SeqCst);
             let now = std::time::Instant::now();
             let interval_duration = now.duration_since(last_time).as_secs_f64();
 
-            let instant_rps = if interval_duration > 0.0 {
-                (current_requests - last_requests) as f64 / interval_duration
+            let instant_pps = if interval_duration > 0.0 {
+                (current_published - last_published) as f64 / interval_duration
             } else {
                 0.0
             };
@@ -169,8 +210,8 @@ async fn run_provider(config: BenchmarkConfig) {
                 0.0
             };
 
-            let overall_rps = if elapsed > 0 {
-                current_requests as f64 / elapsed as f64
+            let overall_pps = if elapsed > 0 {
+                current_published as f64 / elapsed as f64
             } else {
                 0.0
             };
@@ -182,17 +223,17 @@ async fn run_provider(config: BenchmarkConfig) {
             };
 
             println!(
-                "[Provider] Progress: {}/{} sec | Requests: {} | RPS: {:.2} (avg {:.2}) | Throughput: {:.2} MB/s (avg {:.2} MB/s)",
+                "[Provider] Progress: {}/{} sec | Published: {} | PPS: {:.2} (avg {:.2}) | Throughput: {:.2} MB/s (avg {:.2} MB/s)",
                 elapsed.min(duration_secs),
                 duration_secs,
-                current_requests,
-                instant_rps,
-                overall_rps,
+                current_published,
+                instant_pps,
+                overall_pps,
                 instant_throughput_mb,
                 overall_throughput_mb
             );
 
-            last_requests = current_requests;
+            last_published = current_published;
             last_bytes = current_bytes;
             last_time = now;
 
@@ -202,61 +243,88 @@ async fn run_provider(config: BenchmarkConfig) {
         }
     });
 
-    // Run for the specified duration
-    smol::Timer::after(Duration::from_secs(config.duration_secs)).await;
+    // Create rate limiter
+    let mut rate_limiter = RateLimiter::new(config.target_pps);
+
+    // Pre-generate payload
+    let payload = generate_payload(config.payload_size);
+
+    // Publish messages
+    let mut sequence_id: u64 = 0;
+    while benchmark_start.elapsed().as_secs() < config.duration_secs {
+        // Rate limiting
+        rate_limiter.wait_for_token().await;
+
+        // Check if benchmark is still running
+        if benchmark_start.elapsed().as_secs() >= config.duration_secs {
+            break;
+        }
+
+        sequence_id += 1;
+        let timestamp_ns = continuous_current_timestamp_ns();
+
+        let data = ContinuousData {
+            sequence_id,
+            timestamp_ns,
+            payload_size: config.payload_size,
+            payload: payload.clone(),
+        };
+
+        // Publish via the continuous handle
+        continuous_handle.benchmark_stream(&data).await;
+
+        MESSAGES_PUBLISHED.fetch_add(1, Ordering::SeqCst);
+        TOTAL_BYTES_PUBLISHED.fetch_add(config.payload_size as u64, Ordering::SeqCst);
+    }
 
     // Stop metrics collection
     running.store(false, Ordering::SeqCst);
-    let end_time_ns = current_timestamp_ns();
+    let end_time_ns = continuous_current_timestamp_ns();
 
     // Wait for progress thread to finish
     let _ = progress_handle.join();
 
     // Collect final metrics
-    let total_received = REQUESTS_RECEIVED.load(Ordering::SeqCst);
-    let total_processed = REQUESTS_PROCESSED.load(Ordering::SeqCst);
-    let total_bytes = TOTAL_BYTES_PROCESSED.load(Ordering::SeqCst);
+    let total_published = MESSAGES_PUBLISHED.load(Ordering::SeqCst);
+    let total_bytes = TOTAL_BYTES_PUBLISHED.load(Ordering::SeqCst);
 
     println!("\n[Provider] Benchmark completed!");
-    println!("  Total requests received: {}", total_received);
-    println!("  Total requests processed: {}", total_processed);
+    println!("  Total messages published: {}", total_published);
     println!(
-        "  Total bytes processed: {} ({:.2} MB)",
+        "  Total bytes published: {} ({:.2} MB)",
         total_bytes,
         total_bytes as f64 / 1_048_576.0
     );
 
     // Build results
-    let mut results = BenchmarkResults::new(config.clone(), "provider");
+    let mut results = ContinuousBenchmarkResults::new(config.clone(), "provider");
     results.start_time_ns = start_time_ns;
     results.end_time_ns = end_time_ns;
-    results.total_requests = total_received;
-    results.successful_requests = total_processed;
+    results.total_messages_sent = total_published;
 
     // Copy system metrics samples
     if let Ok(guard) = samples.lock() {
         results.system_metrics_samples = guard.clone();
     }
 
-    // Don't include per-request metrics for provider (too much data)
-    results.request_metrics = None;
+    // Don't include per-message metrics for provider (too much data, not meaningful)
+    results.message_metrics = None;
 
     // Calculate derived metrics
     results.finalize();
 
-    // Override throughput with actual bytes processed (more accurate than config-based calculation)
+    // Override throughput with actual bytes published
     if results.total_duration_secs > 0.0 {
-        results.memory_throughput_bytes_per_sec = total_bytes as f64 / results.total_duration_secs;
+        results.throughput_bytes_per_sec = total_bytes as f64 / results.total_duration_secs;
     }
 
     // Print summary
     println!("\n===========================================");
-    println!("           PROVIDER RESULTS SUMMARY");
+    println!("       PROVIDER RESULTS SUMMARY");
     println!("===========================================");
     println!("Duration: {:.2} seconds", results.total_duration_secs);
-    println!("Total Requests: {}", results.total_requests);
-    println!("Processed Requests: {}", results.successful_requests);
-    println!("Requests/Second: {:.2}", results.requests_per_second);
+    println!("Total Messages Published: {}", results.total_messages_sent);
+    println!("Messages/Second: {:.2}", results.messages_per_second);
     println!("-------------------------------------------");
     println!("CPU Usage (avg): {:.2}%", results.avg_cpu_usage_percent);
     println!("CPU Usage (max): {:.2}%", results.max_cpu_usage_percent);
@@ -281,7 +349,7 @@ async fn run_provider(config: BenchmarkConfig) {
     println!("-------------------------------------------");
     println!(
         "Throughput: {:.2} MB/s",
-        results.memory_throughput_bytes_per_sec / 1_048_576.0
+        results.throughput_bytes_per_sec / 1_048_576.0
     );
     println!("===========================================\n");
 
@@ -292,12 +360,12 @@ async fn run_provider(config: BenchmarkConfig) {
 }
 
 fn main() {
-    let config = parse_config_from_args();
+    let config = parse_continuous_config_from_args();
 
     // Set default output file for provider if not specified
-    let config = if config.output_file == "benchmark_results.json" {
-        BenchmarkConfig {
-            output_file: "provider_benchmark_results.json".to_string(),
+    let config = if config.output_file == "continuous_benchmark_results.json" {
+        ContinuousBenchmarkConfig {
+            output_file: "continuous_provider_results.json".to_string(),
             ..config
         }
     } else {

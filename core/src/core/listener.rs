@@ -47,7 +47,7 @@ where
 {
     async fn on_data_available(&mut self, reader: DataReaderAsync<R, ProviderExchange<T>>) {
         let samples = reader
-            .take(1, ANY_SAMPLE_STATE, ANY_VIEW_STATE, ANY_INSTANCE_STATE)
+            .take(100, ANY_SAMPLE_STATE, ANY_VIEW_STATE, ANY_INSTANCE_STATE)
             .await;
 
         if let Err(_) = samples {
