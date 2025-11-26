@@ -489,12 +489,16 @@ fn get_consumer_struct<'a>(
     let data_readers_attributes = get_functionalities_readers_attributes(functionalities);
     let data_writers_attributes = get_functionalities_writers_attributes(functionalities);
 
+    let all_attributes: Vec<_> = data_readers_attributes
+        .into_iter()
+        .chain(data_writers_attributes)
+        .collect();
+
     (
         consumer_struct.clone(),
         quote::quote! {
             struct #consumer_struct {
-                #(#data_readers_attributes),*,
-                #(#data_writers_attributes),*
+                #(#all_attributes),*
             }
         },
     )

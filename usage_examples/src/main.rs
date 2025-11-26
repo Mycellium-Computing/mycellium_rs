@@ -9,7 +9,7 @@ use std::env;
 // The DUST DDS standard runtime depends on the std library. Then is not compatible with no_std.
 use dust_dds::std_runtime::StdRuntime;
 
-// TODO: Allow state.
+// TODO: Allow state via embassy_sync crate
 // TODO:  (Backlog) completely decouple from StdRuntime to allow other runtimes.(To be implemented by the user)
 // Creates a method "person_in_frame", which is used to publish a data piece when needed.
 #[provides(StdRuntime, [

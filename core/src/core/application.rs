@@ -33,7 +33,13 @@ impl<T: DdsRuntime> Application<T> {
         core::future::pending::<()>().await;
     }
 
-    pub async fn register_provider<P: ProviderTrait<T>>(&mut self) {
+    /// Registers a provider and returns its ContinuousHandle for publishing continuous data.
+    ///
+    /// The returned handle contains writers for all continuous functionalities and should
+    /// be stored for the lifetime of the provider to publish data without reinstantiation.
+    ///
+    /// For providers without continuous functionalities, this returns `NoContinuousHandle`.
+    pub async fn register_provider<P: ProviderTrait<T>>(&mut self) -> P::ContinuousHandle {
         let functionalities = P::get_functionalities();
 
         self.provider_registration_writer
@@ -53,6 +59,9 @@ impl<T: DdsRuntime> Application<T> {
 
             // TODO: Should return the writer, reader, topic and listener maybe? I suspect that not returning them and somehow maintaining those references alive will kill the service due to rust reference drop
         }
+
+        // Create and return the continuous handle for this provider
+        P::create_continuous_handle(&self.participant, &self.publisher).await
     }
 
     pub async fn new(

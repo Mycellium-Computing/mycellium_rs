@@ -41,83 +41,166 @@ fn get_functionalities_trait_tokens(
     }
 }
 
-fn get_continuous_functionalities_trait_tokens(
+/// Generates the ContinuousHandle struct that holds writers for all continuous functionalities.
+/// This struct is returned from register_provider and used to publish continuous data.
+fn get_continuous_handle_struct_tokens(
     struct_name: &Ident,
     functionalities: &Functionalities,
-    tokens: &mut proc_macro2::TokenStream,
-) {
-    if !functionalities
-        .functionalities
-        .iter()
-        .any(|f| f.kind == FunctionalityKind::Continuous)
-    {
-        return;
-    }
-
-    let trait_tokens = functionalities
+) -> proc_macro2::TokenStream {
+    let continuous_funcs: Vec<_> = functionalities
         .functionalities
         .iter()
         .filter(|f| f.kind == FunctionalityKind::Continuous)
-        .map(|functionality| {
-            let name = &functionality.name;
-            let output_type = &functionality.output_type;
+        .collect();
 
-            let runtime = &functionalities.runtime;
+    if continuous_funcs.is_empty() {
+        return proc_macro2::TokenStream::new();
+    }
 
-            let func_tokens = quote! {
-                async fn #name(writer: &dust_dds::dds_async::data_writer::DataWriterAsync<#runtime, #output_type>, data: &#output_type);
-            };
+    let runtime = &functionalities.runtime;
+    let handle_name = format_ident!("{}ContinuousHandle", struct_name);
 
-            func_tokens
-        });
-
-    let trait_name = format_ident!("{}ContinuousProviderTrait", struct_name);
-
-    tokens.extend(quote! {
-        trait #trait_name {
-            #(#trait_tokens),*
+    let fields = continuous_funcs.iter().map(|f| {
+        let field_name = format_ident!("{}_writer", f.name.to_string().to_lowercase());
+        let output_type = &f.output_type;
+        quote! {
+            #field_name: dust_dds::dds_async::data_writer::DataWriterAsync<#runtime, #output_type>
         }
     });
+
+    quote! {
+        /// Handle containing writers for continuous functionalities.
+        /// Use this to publish continuous data throughout the provider's lifetime.
+        pub struct #handle_name {
+            #(#fields),*
+        }
+    }
 }
 
-fn get_continuous_functionalities_trait_impl_tokens(
-    runtime: &Ident,
+/// Generates impl block for the ContinuousHandle with methods for each continuous functionality.
+fn get_continuous_handle_impl_tokens(
     struct_name: &Ident,
     functionalities: &Functionalities,
-    tokens: &mut proc_macro2::TokenStream,
-) {
-    if !functionalities
-        .functionalities
-        .iter()
-        .any(|f| f.kind == FunctionalityKind::Continuous)
-    {
-        return;
-    }
-
-    let impl_tokens = functionalities
+) -> proc_macro2::TokenStream {
+    let continuous_funcs: Vec<_> = functionalities
         .functionalities
         .iter()
         .filter(|f| f.kind == FunctionalityKind::Continuous)
-        .map(|functionality| {
-            let name = &functionality.name;
-            let output_type = &functionality.output_type;
+        .collect();
 
-            let func_tokens = quote! {
-                async fn #name(writer: &dust_dds::dds_async::data_writer::DataWriterAsync<#runtime, #output_type>, data: &#output_type) {
-                    writer.write(data, None).await.unwrap();
-                }
-            };
+    if continuous_funcs.is_empty() {
+        return proc_macro2::TokenStream::new();
+    }
 
-            func_tokens
-        });
+    let handle_name = format_ident!("{}ContinuousHandle", struct_name);
 
-    let trait_name = format_ident!("{}ContinuousProviderTrait", struct_name);
+    let methods = continuous_funcs.iter().map(|f| {
+        let method_name = &f.name;
+        let field_name = format_ident!("{}_writer", f.name.to_string().to_lowercase());
+        let output_type = &f.output_type;
 
-    tokens.extend(quote! {
-        impl #trait_name for #struct_name {
-            #(#impl_tokens),*
+        quote! {
+            /// Publishes data for this continuous functionality.
+            pub async fn #method_name(&self, data: &#output_type) {
+                self.#field_name.write(data, None).await.unwrap();
+            }
         }
     });
+
+    quote! {
+        impl #handle_name {
+            #(#methods)*
+        }
+    }
+}
+
+/// Generates the create_continuous_handle implementation that creates writers
+/// and returns a populated ContinuousHandle struct.
+fn get_create_continuous_handle_impl_tokens(
+    struct_name: &Ident,
+    functionalities: &Functionalities,
+) -> proc_macro2::TokenStream {
+    let continuous_funcs: Vec<_> = functionalities
+        .functionalities
+        .iter()
+        .filter(|f| f.kind == FunctionalityKind::Continuous)
+        .collect();
+
+    let runtime = &functionalities.runtime;
+
+    if continuous_funcs.is_empty() {
+        // No continuous functionalities - return NoContinuousHandle
+        return quote! {
+            type ContinuousHandle = mycellium_computing::core::application::provider::NoContinuousHandle;
+
+            async fn create_continuous_handle(
+                _participant: &dust_dds::dds_async::domain_participant::DomainParticipantAsync<#runtime>,
+                _publisher: &dust_dds::dds_async::publisher::PublisherAsync<#runtime>,
+            ) -> Self::ContinuousHandle {
+                mycellium_computing::core::application::provider::NoContinuousHandle
+            }
+        };
+    }
+
+    let handle_name = format_ident!("{}ContinuousHandle", struct_name);
+
+    // Generate topic creation and writer creation for each continuous functionality
+    let topic_creations = continuous_funcs.iter().map(|f| {
+        let topic_var = format_ident!("{}_topic", f.name.to_string().to_lowercase());
+        let topic_name = f.name.to_string().to_lowercase();
+        let output_type = &f.output_type;
+        let type_name = quote!(#output_type).to_string();
+
+        quote! {
+            let #topic_var = participant.create_topic::<#output_type>(
+                #topic_name,
+                #type_name,
+                dust_dds::infrastructure::qos::QosKind::Default,
+                dust_dds::listener::NO_LISTENER,
+                dust_dds::infrastructure::status::NO_STATUS,
+            )
+            .await
+            .unwrap();
+        }
+    });
+
+    let writer_creations = continuous_funcs.iter().map(|f| {
+        let writer_var = format_ident!("{}_writer", f.name.to_string().to_lowercase());
+        let topic_var = format_ident!("{}_topic", f.name.to_string().to_lowercase());
+        let output_type = &f.output_type;
+
+        quote! {
+            let #writer_var = publisher.create_datawriter::<#output_type>(
+                &#topic_var,
+                dust_dds::infrastructure::qos::QosKind::Default,
+                dust_dds::listener::NO_LISTENER,
+                dust_dds::infrastructure::status::NO_STATUS,
+            )
+            .await
+            .unwrap();
+        }
+    });
+
+    let field_inits = continuous_funcs.iter().map(|f| {
+        let field_name = format_ident!("{}_writer", f.name.to_string().to_lowercase());
+        quote! { #field_name }
+    });
+
+    quote! {
+        type ContinuousHandle = #handle_name;
+
+        async fn create_continuous_handle(
+            participant: &dust_dds::dds_async::domain_participant::DomainParticipantAsync<#runtime>,
+            publisher: &dust_dds::dds_async::publisher::PublisherAsync<#runtime>,
+        ) -> Self::ContinuousHandle {
+            #(#topic_creations)*
+            #(#writer_creations)*
+
+            #handle_name {
+                #(#field_inits),*
+            }
+        }
+    }
 }
 
 fn get_provider_trait_tokens(
@@ -129,19 +212,19 @@ fn get_provider_trait_tokens(
     let mut trait_tokens = proc_macro2::TokenStream::new();
     get_functionalities_trait_tokens(functionalities, &mut trait_tokens);
 
-    let mut continuous_trait_tokens = proc_macro2::TokenStream::new();
-    get_continuous_functionalities_trait_tokens(
-        struct_name,
-        functionalities,
-        &mut continuous_trait_tokens,
-    );
+    // Generate ContinuousHandle struct and impl
+    let continuous_handle_struct =
+        get_continuous_handle_struct_tokens(struct_name, functionalities);
+    let continuous_handle_impl = get_continuous_handle_impl_tokens(struct_name, functionalities);
 
     quote! {
         trait #provider_trait_name {
             #trait_tokens
         }
 
-        #continuous_trait_tokens
+        #continuous_handle_struct
+
+        #continuous_handle_impl
     }
 }
 
@@ -339,18 +422,16 @@ fn get_provider_impl_tokens(
     let mut channel_tokens = proc_macro2::TokenStream::new();
     get_functionalities_channel_tokens(provider_name, functionalities, &mut channel_tokens);
 
-    let mut continuous_trait_implementation_tokens = proc_macro2::TokenStream::new();
-    get_continuous_functionalities_trait_impl_tokens(
-        &functionalities.runtime,
-        provider_name,
-        functionalities,
-        &mut continuous_trait_implementation_tokens,
-    );
+    // Get the create_continuous_handle implementation
+    let continuous_handle_impl =
+        get_create_continuous_handle_impl_tokens(provider_name, functionalities);
 
     let runtime = &functionalities.runtime;
 
     quote::quote! {
         impl mycellium_computing::core::application::provider::ProviderTrait<#runtime> for #provider_name {
+            #continuous_handle_impl
+
             fn get_functionalities() -> mycellium_computing::core::messages::ProviderMessage {
                 #message_tokens
             }
@@ -365,8 +446,6 @@ fn get_provider_impl_tokens(
                 #channel_tokens
             }
         }
-
-        #continuous_trait_implementation_tokens
     }
 }
 
