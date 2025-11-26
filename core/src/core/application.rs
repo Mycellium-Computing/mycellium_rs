@@ -56,8 +56,6 @@ impl<T: DdsRuntime> Application<T> {
                 &mut self.objects_storage,
             )
             .await;
-
-            // TODO: Should return the writer, reader, topic and listener maybe? I suspect that not returning them and somehow maintaining those references alive will kill the service due to rust reference drop
         }
 
         // Create and return the continuous handle for this provider

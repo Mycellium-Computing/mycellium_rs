@@ -10,7 +10,6 @@ use std::env;
 use dust_dds::std_runtime::StdRuntime;
 
 // TODO: Allow state via embassy_sync crate
-// TODO:  (Backlog) completely decouple from StdRuntime to allow other runtimes.(To be implemented by the user)
 // Creates a method "person_in_frame", which is used to publish a data piece when needed.
 #[provides(StdRuntime, [
     RequestResponse("face_recognition", FaceRecognitionRequest, FaceRecognitionResponse),

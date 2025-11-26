@@ -390,7 +390,7 @@ fn generate_request_response_method(
             use mycellium_computing::futures::FutureExt;
 
             let request = mycellium_computing::core::messages::ProviderExchange {
-                id: 0, // For now
+                id: mycellium_computing::utils::next_request_id(),
                 payload: data,
             };
 
@@ -417,7 +417,7 @@ fn generate_response_method(
             use mycellium_computing::futures::FutureExt;
 
             let request = mycellium_computing::core::messages::ProviderExchange {
-                id: 0, // TODO: Use dynamic ID generation
+                id: mycellium_computing::utils::next_request_id(),
                 payload: mycellium_computing::core::messages::EmptyMessage,
             };
 
