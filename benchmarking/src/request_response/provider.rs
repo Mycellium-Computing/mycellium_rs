@@ -1,23 +1,21 @@
 #[path = "../common/mod.rs"]
 mod common;
 
-use common::types::{
-    BenchmarkConfig, BenchmarkRequest, BenchmarkResponse, BenchmarkResults, SystemMetricsSample,
-    current_timestamp_ns, parse_config_from_args,
-};
+use common::metrics_collector::{AggregatedMetrics, MetricsCollector, MetricsCollectorConfig};
+use common::types::{BenchmarkConfig, BenchmarkRequest, BenchmarkResponse, parse_config_from_args};
 use dust_dds::dds_async::domain_participant_factory::DomainParticipantFactoryAsync;
 use dust_dds::std_runtime::StdRuntime;
 use mycellium_computing::core::application::Application;
 use mycellium_computing::provides;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use sysinfo::{Pid, ProcessesToUpdate, System};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
-/// Global state for tracking provider metrics
-static REQUESTS_RECEIVED: AtomicU64 = AtomicU64::new(0);
-static REQUESTS_PROCESSED: AtomicU64 = AtomicU64::new(0);
-static TOTAL_BYTES_PROCESSED: AtomicU64 = AtomicU64::new(0);
+use crate::common::metrics_collector::AtomicCounters;
+
+/// Shared counters for the provider handler
+/// Using a static Arc to allow access from the handler
+static PROVIDER_COUNTERS: std::sync::OnceLock<Arc<AtomicCounters>> = std::sync::OnceLock::new();
 
 /// Provider implementation for benchmarking
 #[provides(StdRuntime, [
@@ -27,79 +25,35 @@ struct BenchmarkProvider;
 
 impl BenchmarkProviderProviderTrait for BenchmarkProvider {
     async fn benchmark_request(request: BenchmarkRequest) -> BenchmarkResponse {
-        REQUESTS_RECEIVED.fetch_add(1, Ordering::SeqCst);
-
-        // Track bytes processed for accurate throughput calculation
-        let payload_len = request.payload.len() as u64;
-        TOTAL_BYTES_PROCESSED.fetch_add(payload_len, Ordering::SeqCst);
+        // Get counters (lock-free atomic operations)
+        if let Some(counters) = PROVIDER_COUNTERS.get() {
+            counters.inc_received();
+            counters.add_bytes_received(request.payload.len() as u64);
+        }
 
         // Create response with same payload size
         let response = BenchmarkResponse {
             request_id: request.request_id,
             request_timestamp_ns: request.timestamp_ns,
-            response_timestamp_ns: current_timestamp_ns(),
+            response_timestamp_ns: MetricsCollector::current_timestamp_ns(),
             payload_size: request.payload_size,
             payload: request.payload, // Echo back the payload
         };
 
-        REQUESTS_PROCESSED.fetch_add(1, Ordering::SeqCst);
+        // Track response
+        if let Some(counters) = PROVIDER_COUNTERS.get() {
+            counters.inc_sent();
+            counters.add_bytes_sent(response.payload_size as u64);
+        }
+
         response
     }
-}
-
-/// Collect system metrics sample
-fn collect_system_metrics(sys: &mut System, pid: Pid) -> SystemMetricsSample {
-    sys.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
-    sys.refresh_memory();
-
-    let process = sys.process(pid);
-    let cpu_usage = process.map(|p| p.cpu_usage() as f64).unwrap_or(0.0);
-    let memory_usage = process.map(|p| p.memory()).unwrap_or(0);
-    let total_memory = sys.total_memory();
-    let memory_percent = if total_memory > 0 {
-        (memory_usage as f64 / total_memory as f64) * 100.0
-    } else {
-        0.0
-    };
-
-    SystemMetricsSample {
-        timestamp_ns: current_timestamp_ns(),
-        cpu_usage_percent: cpu_usage,
-        memory_usage_bytes: memory_usage,
-        total_memory_bytes: total_memory,
-        memory_usage_percent: memory_percent,
-    }
-}
-
-/// Metrics collector task
-fn start_metrics_collector(
-    config: &BenchmarkConfig,
-    samples: Arc<Mutex<Vec<SystemMetricsSample>>>,
-    running: Arc<AtomicBool>,
-) {
-    let interval_ms = config.metrics_sample_interval_ms;
-
-    std::thread::spawn(move || {
-        let mut sys = System::new_all();
-        let pid = Pid::from_u32(std::process::id());
-
-        // Initial refresh to get accurate CPU readings
-        sys.refresh_all();
-        std::thread::sleep(Duration::from_millis(100));
-
-        while running.load(Ordering::SeqCst) {
-            let sample = collect_system_metrics(&mut sys, pid);
-            if let Ok(mut guard) = samples.lock() {
-                guard.push(sample);
-            }
-            std::thread::sleep(Duration::from_millis(interval_ms));
-        }
-    });
 }
 
 async fn run_provider(config: BenchmarkConfig) {
     println!("===========================================");
     println!("  Request-Response Benchmark - PROVIDER");
+    println!("       (Low-Overhead Metrics Collection)");
     println!("===========================================");
     println!("Configuration:");
     println!("  Domain ID: {}", config.domain_id);
@@ -112,6 +66,24 @@ async fn run_provider(config: BenchmarkConfig) {
     println!("  Output file: {}", config.output_file);
     println!("===========================================\n");
 
+    // Initialize the low-overhead metrics collector
+    let metrics_config = MetricsCollectorConfig {
+        duration_secs: config.duration_secs,
+        sample_interval_ms: config.metrics_sample_interval_ms,
+        latency_reservoir_size: 1_000, // Provider doesn't measure latency, smaller buffer
+        track_latencies: false,        // Provider doesn't track latencies
+    };
+
+    let mut metrics_collector = MetricsCollector::new(metrics_config);
+
+    // Capture baseline memory BEFORE initializing DDS
+    println!("[Provider] Capturing baseline memory...");
+    metrics_collector.capture_baseline();
+
+    // Set up shared counters for the handler
+    let counters = metrics_collector.get_counters();
+    let _ = PROVIDER_COUNTERS.set(counters.clone());
+
     // Initialize DDS
     let factory = DomainParticipantFactoryAsync::get_instance();
     let mut app = Application::new(config.domain_id, "BenchmarkProvider", factory).await;
@@ -120,31 +92,25 @@ async fn run_provider(config: BenchmarkConfig) {
     app.register_provider::<BenchmarkProvider>().await;
     println!("[Provider] Registered and ready to serve requests");
 
-    // Initialize metrics collection
-    let samples: Arc<Mutex<Vec<SystemMetricsSample>>> = Arc::new(Mutex::new(Vec::new()));
-    let running = Arc::new(AtomicBool::new(true));
+    // Start metrics collection in background thread
+    let metrics_handle = metrics_collector.start();
+    println!("[Provider] Metrics collection started");
 
-    // Start metrics collector
-    start_metrics_collector(&config, samples.clone(), running.clone());
-
-    // Record start time
-    let start_time_ns = current_timestamp_ns();
+    let benchmark_start = Instant::now();
     println!(
         "[Provider] Benchmark started at timestamp: {}",
-        start_time_ns
+        MetricsCollector::current_timestamp_ns()
     );
 
-    // Reset counters
-    REQUESTS_RECEIVED.store(0, Ordering::SeqCst);
-    REQUESTS_PROCESSED.store(0, Ordering::SeqCst);
-    TOTAL_BYTES_PROCESSED.store(0, Ordering::SeqCst);
-
-    // Progress reporting task
-    let duration_secs = config.duration_secs;
+    // Progress reporting (separate from measurement to avoid interference)
+    let running = Arc::new(AtomicBool::new(true));
     let progress_running = running.clone();
+    let progress_counters = counters.clone();
+    let duration_secs = config.duration_secs;
+
     let progress_handle = std::thread::spawn(move || {
-        let start = std::time::Instant::now();
-        let mut last_requests = 0u64;
+        let start = Instant::now();
+        let mut last_received = 0u64;
         let mut last_bytes = 0u64;
         let mut last_time = start;
 
@@ -152,31 +118,30 @@ async fn run_provider(config: BenchmarkConfig) {
             std::thread::sleep(Duration::from_secs(1));
 
             let elapsed = start.elapsed().as_secs();
-            let current_requests = REQUESTS_PROCESSED.load(Ordering::SeqCst);
-            let current_bytes = TOTAL_BYTES_PROCESSED.load(Ordering::SeqCst);
-            let now = std::time::Instant::now();
+            let snapshot = progress_counters.snapshot();
+            let now = Instant::now();
             let interval_duration = now.duration_since(last_time).as_secs_f64();
 
             let instant_rps = if interval_duration > 0.0 {
-                (current_requests - last_requests) as f64 / interval_duration
+                (snapshot.messages_received - last_received) as f64 / interval_duration
             } else {
                 0.0
             };
 
             let instant_throughput_mb = if interval_duration > 0.0 {
-                ((current_bytes - last_bytes) as f64 / interval_duration) / 1_048_576.0
+                ((snapshot.bytes_received - last_bytes) as f64 / interval_duration) / 1_048_576.0
             } else {
                 0.0
             };
 
             let overall_rps = if elapsed > 0 {
-                current_requests as f64 / elapsed as f64
+                snapshot.messages_received as f64 / elapsed as f64
             } else {
                 0.0
             };
 
             let overall_throughput_mb = if elapsed > 0 {
-                (current_bytes as f64 / elapsed as f64) / 1_048_576.0
+                (snapshot.bytes_received as f64 / elapsed as f64) / 1_048_576.0
             } else {
                 0.0
             };
@@ -185,15 +150,15 @@ async fn run_provider(config: BenchmarkConfig) {
                 "[Provider] Progress: {}/{} sec | Requests: {} | RPS: {:.2} (avg {:.2}) | Throughput: {:.2} MB/s (avg {:.2} MB/s)",
                 elapsed.min(duration_secs),
                 duration_secs,
-                current_requests,
+                snapshot.messages_received,
                 instant_rps,
                 overall_rps,
                 instant_throughput_mb,
                 overall_throughput_mb
             );
 
-            last_requests = current_requests;
-            last_bytes = current_bytes;
+            last_received = snapshot.messages_received;
+            last_bytes = snapshot.bytes_received;
             last_time = now;
 
             if elapsed >= duration_secs {
@@ -203,90 +168,28 @@ async fn run_provider(config: BenchmarkConfig) {
     });
 
     // Run for the specified duration
-    smol::Timer::after(Duration::from_secs(config.duration_secs)).await;
+    while benchmark_start.elapsed().as_secs() < config.duration_secs {
+        smol::Timer::after(Duration::from_millis(100)).await;
+    }
+
+    // Stop progress reporting
+    running.store(false, Ordering::SeqCst);
 
     // Stop metrics collection
-    running.store(false, Ordering::SeqCst);
-    let end_time_ns = current_timestamp_ns();
+    metrics_collector.stop();
 
-    // Wait for progress thread to finish
+    // Wait for background threads to finish
     let _ = progress_handle.join();
-
-    // Collect final metrics
-    let total_received = REQUESTS_RECEIVED.load(Ordering::SeqCst);
-    let total_processed = REQUESTS_PROCESSED.load(Ordering::SeqCst);
-    let total_bytes = TOTAL_BYTES_PROCESSED.load(Ordering::SeqCst);
+    let _ = metrics_handle.join();
 
     println!("\n[Provider] Benchmark completed!");
-    println!("  Total requests received: {}", total_received);
-    println!("  Total requests processed: {}", total_processed);
-    println!(
-        "  Total bytes processed: {} ({:.2} MB)",
-        total_bytes,
-        total_bytes as f64 / 1_048_576.0
-    );
 
-    // Build results
-    let mut results = BenchmarkResults::new(config.clone(), "provider");
-    results.start_time_ns = start_time_ns;
-    results.end_time_ns = end_time_ns;
-    results.total_requests = total_received;
-    results.successful_requests = total_processed;
-
-    // Copy system metrics samples
-    if let Ok(guard) = samples.lock() {
-        results.system_metrics_samples = guard.clone();
-    }
-
-    // Don't include per-request metrics for provider (too much data)
-    results.request_metrics = None;
-
-    // Calculate derived metrics
-    results.finalize();
-
-    // Override throughput with actual bytes processed (more accurate than config-based calculation)
-    if results.total_duration_secs > 0.0 {
-        results.memory_throughput_bytes_per_sec = total_bytes as f64 / results.total_duration_secs;
-    }
-
-    // Print summary
-    println!("\n===========================================");
-    println!("           PROVIDER RESULTS SUMMARY");
-    println!("===========================================");
-    println!("Duration: {:.2} seconds", results.total_duration_secs);
-    println!("Total Requests: {}", results.total_requests);
-    println!("Processed Requests: {}", results.successful_requests);
-    println!("Requests/Second: {:.2}", results.requests_per_second);
-    println!("-------------------------------------------");
-    println!("CPU Usage (avg): {:.2}%", results.avg_cpu_usage_percent);
-    println!("CPU Usage (max): {:.2}%", results.max_cpu_usage_percent);
-    println!("CPU Usage (min): {:.2}%", results.min_cpu_usage_percent);
-    println!("-------------------------------------------");
-    println!(
-        "Memory Usage (avg): {:.2} MB",
-        results.avg_memory_usage_bytes as f64 / 1_048_576.0
-    );
-    println!(
-        "Memory Usage (max): {:.2} MB",
-        results.max_memory_usage_bytes as f64 / 1_048_576.0
-    );
-    println!(
-        "Memory Usage (min): {:.2} MB",
-        results.min_memory_usage_bytes as f64 / 1_048_576.0
-    );
-    println!(
-        "Memory Usage (avg %): {:.2}%",
-        results.avg_memory_usage_percent
-    );
-    println!("-------------------------------------------");
-    println!(
-        "Throughput: {:.2} MB/s",
-        results.memory_throughput_bytes_per_sec / 1_048_576.0
-    );
-    println!("===========================================\n");
+    // Compute and display aggregated metrics
+    let metrics = AggregatedMetrics::from_collector(&metrics_collector);
+    metrics.print_summary("PROVIDER");
 
     // Save results to JSON
-    if let Err(e) = results.save_to_file() {
+    if let Err(e) = metrics.save_to_file(&config.output_file) {
         eprintln!("[Provider] Failed to save results: {}", e);
     }
 }

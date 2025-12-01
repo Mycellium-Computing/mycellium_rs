@@ -1,25 +1,17 @@
 #[path = "../common/mod.rs"]
 mod common;
 
-use common::types::{
-    BenchmarkConfig, BenchmarkRequest, BenchmarkResponse, BenchmarkResults, RequestMetrics,
-    SystemMetricsSample, current_timestamp_ns, parse_config_from_args,
-};
+use common::metrics_collector::{AggregatedMetrics, MetricsCollector, MetricsCollectorConfig};
+use common::types::{BenchmarkConfig, BenchmarkRequest, BenchmarkResponse, parse_config_from_args};
 use dust_dds::dds_async::domain_participant_factory::DomainParticipantFactoryAsync;
 use dust_dds::infrastructure::qos::QosKind;
 use dust_dds::infrastructure::status::NO_STATUS;
 use dust_dds::listener::NO_LISTENER;
 use dust_dds::std_runtime::StdRuntime;
 use mycellium_computing::consumes;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
-use sysinfo::{Pid, ProcessesToUpdate, System};
-
-/// Global counters for tracking requests
-static REQUESTS_SENT: AtomicU64 = AtomicU64::new(0);
-static REQUESTS_SUCCESS: AtomicU64 = AtomicU64::new(0);
-static REQUESTS_FAILED: AtomicU64 = AtomicU64::new(0);
 
 /// Consumer implementation for benchmarking
 #[consumes(StdRuntime, [
@@ -27,62 +19,12 @@ static REQUESTS_FAILED: AtomicU64 = AtomicU64::new(0);
 ])]
 struct BenchmarkConsumer;
 
-/// Collect system metrics sample
-fn collect_system_metrics(sys: &mut System, pid: Pid) -> SystemMetricsSample {
-    sys.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
-    sys.refresh_memory();
-
-    let process = sys.process(pid);
-    let cpu_usage = process.map(|p| p.cpu_usage() as f64).unwrap_or(0.0);
-    let memory_usage = process.map(|p| p.memory()).unwrap_or(0);
-    let total_memory = sys.total_memory();
-    let memory_percent = if total_memory > 0 {
-        (memory_usage as f64 / total_memory as f64) * 100.0
-    } else {
-        0.0
-    };
-
-    SystemMetricsSample {
-        timestamp_ns: current_timestamp_ns(),
-        cpu_usage_percent: cpu_usage,
-        memory_usage_bytes: memory_usage,
-        total_memory_bytes: total_memory,
-        memory_usage_percent: memory_percent,
-    }
-}
-
-/// Metrics collector task
-fn start_metrics_collector(
-    config: &BenchmarkConfig,
-    samples: Arc<Mutex<Vec<SystemMetricsSample>>>,
-    running: Arc<AtomicBool>,
-) {
-    let interval_ms = config.metrics_sample_interval_ms;
-
-    std::thread::spawn(move || {
-        let mut sys = System::new_all();
-        let pid = Pid::from_u32(std::process::id());
-
-        // Initial refresh to get accurate CPU readings
-        sys.refresh_all();
-        std::thread::sleep(Duration::from_millis(100));
-
-        while running.load(Ordering::SeqCst) {
-            let sample = collect_system_metrics(&mut sys, pid);
-            if let Ok(mut guard) = samples.lock() {
-                guard.push(sample);
-            }
-            std::thread::sleep(Duration::from_millis(interval_ms));
-        }
-    });
-}
-
 /// Generate payload of specified size
 fn generate_payload(size: u32) -> Vec<u8> {
     (0..size).map(|i| (i % 256) as u8).collect()
 }
 
-/// Rate limiter to achieve target RPS
+/// Rate limiter to achieve target RPS using token bucket algorithm
 struct RateLimiter {
     target_rps: u64,
     interval_ns: u64,
@@ -114,9 +56,9 @@ impl RateLimiter {
         let now = Instant::now();
         let elapsed = now.duration_since(self.last_request_time);
 
-        // Add tokens based on elapsed time
+        // Add tokens based on elapsed time (max 1.0 to prevent bursts)
         let tokens_to_add = elapsed.as_secs_f64() * self.target_rps as f64;
-        self.tokens = (self.tokens + tokens_to_add).min(self.target_rps as f64);
+        self.tokens = (self.tokens + tokens_to_add).min(1.0);
         self.last_request_time = now;
 
         if self.tokens >= 1.0 {
@@ -134,6 +76,7 @@ impl RateLimiter {
 async fn run_consumer(config: BenchmarkConfig) {
     println!("===========================================");
     println!("  Request-Response Benchmark - CONSUMER");
+    println!("       (Low-Overhead Metrics Collection)");
     println!("===========================================");
     println!("Configuration:");
     println!("  Domain ID: {}", config.domain_id);
@@ -147,6 +90,20 @@ async fn run_consumer(config: BenchmarkConfig) {
     );
     println!("  Output file: {}", config.output_file);
     println!("===========================================\n");
+
+    // Initialize the low-overhead metrics collector
+    let metrics_config = MetricsCollectorConfig {
+        duration_secs: config.duration_secs,
+        sample_interval_ms: config.metrics_sample_interval_ms,
+        latency_reservoir_size: 10_000, // Keep up to 10k latency samples
+        track_latencies: true,
+    };
+
+    let mut metrics_collector = MetricsCollector::new(metrics_config);
+
+    // Capture baseline memory BEFORE initializing DDS
+    println!("[Consumer] Capturing baseline memory...");
+    metrics_collector.capture_baseline();
 
     // Initialize DDS
     let factory = DomainParticipantFactoryAsync::get_instance();
@@ -179,69 +136,72 @@ async fn run_consumer(config: BenchmarkConfig) {
     println!("[Consumer] Waiting for provider (3 seconds)...");
     smol::Timer::after(Duration::from_secs(3)).await;
 
-    // Initialize metrics collection
-    let samples: Arc<Mutex<Vec<SystemMetricsSample>>> = Arc::new(Mutex::new(Vec::new()));
-    let request_metrics: Arc<Mutex<Vec<RequestMetrics>>> = Arc::new(Mutex::new(Vec::new()));
-    let running = Arc::new(AtomicBool::new(true));
+    // Get shared references for metrics (lock-free)
+    let counters = metrics_collector.get_counters();
+    let latency_reservoir = metrics_collector.get_latency_reservoir();
 
-    // Start metrics collector
-    start_metrics_collector(&config, samples.clone(), running.clone());
+    // Start metrics collection in background thread
+    let metrics_handle = metrics_collector.start();
+    println!("[Consumer] Metrics collection started");
 
-    // Reset counters
-    REQUESTS_SENT.store(0, Ordering::SeqCst);
-    REQUESTS_SUCCESS.store(0, Ordering::SeqCst);
-    REQUESTS_FAILED.store(0, Ordering::SeqCst);
-
-    // Record start time
-    let start_time_ns = current_timestamp_ns();
     let benchmark_start = Instant::now();
     println!(
         "[Consumer] Benchmark started at timestamp: {}",
-        start_time_ns
+        MetricsCollector::current_timestamp_ns()
     );
 
-    // Progress reporting task
-    let duration_secs = config.duration_secs;
+    // Progress reporting (separate from measurement to avoid interference)
+    let running = Arc::new(AtomicBool::new(true));
     let progress_running = running.clone();
+    let progress_counters = counters.clone();
+    let duration_secs = config.duration_secs;
+
     let progress_handle = std::thread::spawn(move || {
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let mut last_sent = 0u64;
+        let mut last_success = 0u64;
         let mut last_time = start;
 
         while progress_running.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_secs(1));
 
             let elapsed = start.elapsed().as_secs();
-            let current_sent = REQUESTS_SENT.load(Ordering::SeqCst);
-            let current_success = REQUESTS_SUCCESS.load(Ordering::SeqCst);
-            let current_failed = REQUESTS_FAILED.load(Ordering::SeqCst);
-            let now = std::time::Instant::now();
+            let snapshot = progress_counters.snapshot();
+            let now = Instant::now();
             let interval_duration = now.duration_since(last_time).as_secs_f64();
 
             let instant_rps = if interval_duration > 0.0 {
-                (current_sent - last_sent) as f64 / interval_duration
+                (snapshot.messages_sent - last_sent) as f64 / interval_duration
             } else {
                 0.0
             };
 
-            let success_rate = if current_sent > 0 {
-                (current_success as f64 / current_sent as f64) * 100.0
+            let success_rate = if snapshot.messages_sent > 0 {
+                (snapshot.messages_received as f64 / snapshot.messages_sent as f64) * 100.0
+            } else {
+                0.0
+            };
+
+            let instant_success_rps = if interval_duration > 0.0 {
+                (snapshot.messages_received - last_success) as f64 / interval_duration
             } else {
                 0.0
             };
 
             println!(
-                "[Consumer] Progress: {}/{} sec | Sent: {} | Success: {} | Failed: {} | RPS: {:.2} | Success Rate: {:.1}%",
+                "[Consumer] Progress: {}/{} sec | Sent: {} | Success: {} | Failed: {} | RPS: {:.2} | Success RPS: {:.2} | Rate: {:.1}%",
                 elapsed.min(duration_secs),
                 duration_secs,
-                current_sent,
-                current_success,
-                current_failed,
+                snapshot.messages_sent,
+                snapshot.messages_received,
+                snapshot.messages_failed,
                 instant_rps,
+                instant_success_rps,
                 success_rate
             );
 
-            last_sent = current_sent;
+            last_sent = snapshot.messages_sent;
+            last_success = snapshot.messages_received;
             last_time = now;
 
             if elapsed >= duration_secs {
@@ -250,15 +210,16 @@ async fn run_consumer(config: BenchmarkConfig) {
         }
     });
 
-    // Create rate limiter
+    // Create rate limiter (capped at 1 token to prevent bursts)
     let mut rate_limiter = RateLimiter::new(config.target_rps);
 
-    // Pre-generate payload
+    // Pre-generate payload ONCE to avoid allocation in hot path
     let payload = generate_payload(config.payload_size);
     let timeout =
         dust_dds::dcps::infrastructure::time::Duration::new(config.request_timeout_secs as i32, 0);
+    let payload_size = config.payload_size as u64;
 
-    // Send requests
+    // Main benchmark loop - minimal overhead
     let mut request_id: u64 = 0;
     while benchmark_start.elapsed().as_secs() < config.duration_secs {
         // Rate limiting
@@ -270,7 +231,7 @@ async fn run_consumer(config: BenchmarkConfig) {
         }
 
         request_id += 1;
-        let sent_timestamp_ns = current_timestamp_ns();
+        let sent_timestamp_ns = MetricsCollector::current_timestamp_ns();
 
         let request = BenchmarkRequest {
             request_id,
@@ -279,161 +240,56 @@ async fn run_consumer(config: BenchmarkConfig) {
             payload: payload.clone(),
         };
 
-        REQUESTS_SENT.fetch_add(1, Ordering::SeqCst);
+        // Increment sent counter (lock-free atomic)
+        counters.inc_sent();
+        counters.add_bytes_sent(payload_size);
 
-        // Send request and track response
+        // Send request and measure round-trip time
         let result = consumer.benchmark_request(request, timeout).await;
+        let received_timestamp_ns = MetricsCollector::current_timestamp_ns();
 
-        let received_timestamp_ns = current_timestamp_ns();
-        let (was_successful, round_trip_time_ns, error_message) = match result {
+        match result {
             Some(response) => {
-                REQUESTS_SUCCESS.fetch_add(1, Ordering::SeqCst);
-                let rtt = received_timestamp_ns - sent_timestamp_ns;
+                // Calculate round-trip latency
+                let rtt_ns = received_timestamp_ns - sent_timestamp_ns;
+
                 // Verify response integrity
-                if response.request_id != request_id {
-                    (
-                        false,
-                        Some(rtt),
-                        Some(format!(
-                            "Request ID mismatch: expected {}, got {}",
-                            request_id, response.request_id
-                        )),
-                    )
+                if response.request_id == request_id {
+                    counters.inc_received();
+                    counters.add_bytes_received(response.payload_size as u64);
+
+                    // Record latency using reservoir sampling (lock-free)
+                    latency_reservoir.add_sample(rtt_ns);
                 } else {
-                    (true, Some(rtt), None)
+                    // ID mismatch counts as failure
+                    counters.inc_failed();
                 }
             }
             None => {
-                REQUESTS_FAILED.fetch_add(1, Ordering::SeqCst);
-                (false, None, Some("Request timed out or failed".to_string()))
+                // Timeout or failure
+                counters.inc_failed();
             }
-        };
-
-        // Record request metrics
-        let req_metrics = RequestMetrics {
-            request_id,
-            sent_timestamp_ns,
-            received_timestamp_ns: if was_successful {
-                Some(received_timestamp_ns)
-            } else {
-                None
-            },
-            round_trip_time_ns,
-            was_successful,
-            error_message,
-        };
-
-        if let Ok(mut guard) = request_metrics.lock() {
-            guard.push(req_metrics);
         }
     }
 
-    // Stop metrics collection
+    // Stop progress reporting
     running.store(false, Ordering::SeqCst);
-    let end_time_ns = current_timestamp_ns();
 
-    // Wait for progress thread to finish
+    // Stop metrics collection
+    metrics_collector.stop();
+
+    // Wait for background threads to finish
     let _ = progress_handle.join();
-
-    // Collect final metrics
-    let total_sent = REQUESTS_SENT.load(Ordering::SeqCst);
-    let total_success = REQUESTS_SUCCESS.load(Ordering::SeqCst);
-    let total_failed = REQUESTS_FAILED.load(Ordering::SeqCst);
+    let _ = metrics_handle.join();
 
     println!("\n[Consumer] Benchmark completed!");
-    println!("  Total requests sent: {}", total_sent);
-    println!("  Successful requests: {}", total_success);
-    println!("  Failed requests: {}", total_failed);
 
-    // Build results
-    let mut results = BenchmarkResults::new(config.clone(), "consumer");
-    results.start_time_ns = start_time_ns;
-    results.end_time_ns = end_time_ns;
-    results.total_requests = total_sent;
-    results.successful_requests = total_success;
-
-    // Copy system metrics samples
-    if let Ok(guard) = samples.lock() {
-        results.system_metrics_samples = guard.clone();
-    }
-
-    // Copy request metrics
-    if let Ok(guard) = request_metrics.lock() {
-        results.request_metrics = Some(guard.clone());
-    }
-
-    // Calculate derived metrics
-    results.finalize();
-
-    // Print summary
-    println!("\n===========================================");
-    println!("           CONSUMER RESULTS SUMMARY");
-    println!("===========================================");
-    println!("Duration: {:.2} seconds", results.total_duration_secs);
-    println!("-------------------------------------------");
-    println!("REQUEST METRICS:");
-    println!("  Total Requests: {}", results.total_requests);
-    println!("  Successful Requests: {}", results.successful_requests);
-    println!("  Lost/Failed Requests: {}", results.lost_requests);
-    println!("  Loss Rate: {:.2}%", results.loss_rate_percent);
-    println!("  Requests/Second: {:.2}", results.requests_per_second);
-    println!(
-        "  Successful Requests/Second: {:.2}",
-        results.successful_requests_per_second
-    );
-    println!("-------------------------------------------");
-    println!("LATENCY METRICS:");
-    if let Some(min) = results.min_latency_ns {
-        println!("  Min Latency: {:.3} ms", min as f64 / 1_000_000.0);
-    }
-    if let Some(max) = results.max_latency_ns {
-        println!("  Max Latency: {:.3} ms", max as f64 / 1_000_000.0);
-    }
-    if let Some(avg) = results.avg_latency_ns {
-        println!("  Avg Latency: {:.3} ms", avg / 1_000_000.0);
-    }
-    if let Some(p50) = results.p50_latency_ns {
-        println!("  P50 Latency: {:.3} ms", p50 as f64 / 1_000_000.0);
-    }
-    if let Some(p95) = results.p95_latency_ns {
-        println!("  P95 Latency: {:.3} ms", p95 as f64 / 1_000_000.0);
-    }
-    if let Some(p99) = results.p99_latency_ns {
-        println!("  P99 Latency: {:.3} ms", p99 as f64 / 1_000_000.0);
-    }
-    if let Some(std_dev) = results.latency_std_dev_ns {
-        println!("  Std Dev: {:.3} ms", std_dev / 1_000_000.0);
-    }
-    println!("-------------------------------------------");
-    println!("CPU USAGE:");
-    println!("  Average: {:.2}%", results.avg_cpu_usage_percent);
-    println!("  Maximum: {:.2}%", results.max_cpu_usage_percent);
-    println!("  Minimum: {:.2}%", results.min_cpu_usage_percent);
-    println!("-------------------------------------------");
-    println!("MEMORY USAGE:");
-    println!(
-        "  Average: {:.2} MB",
-        results.avg_memory_usage_bytes as f64 / 1_048_576.0
-    );
-    println!(
-        "  Maximum: {:.2} MB",
-        results.max_memory_usage_bytes as f64 / 1_048_576.0
-    );
-    println!(
-        "  Minimum: {:.2} MB",
-        results.min_memory_usage_bytes as f64 / 1_048_576.0
-    );
-    println!("  Average (%): {:.2}%", results.avg_memory_usage_percent);
-    println!("-------------------------------------------");
-    println!("THROUGHPUT:");
-    println!(
-        "  Memory Throughput: {:.2} MB/s",
-        results.memory_throughput_bytes_per_sec / 1_048_576.0
-    );
-    println!("===========================================\n");
+    // Compute and display aggregated metrics
+    let metrics = AggregatedMetrics::from_collector(&metrics_collector);
+    metrics.print_summary("CONSUMER");
 
     // Save results to JSON
-    if let Err(e) = results.save_to_file() {
+    if let Err(e) = metrics.save_to_file(&config.output_file) {
         eprintln!("[Consumer] Failed to save results: {}", e);
     }
 }

@@ -1,3 +1,7 @@
+// Allow unused code since this module is shared across multiple binaries
+// and each binary only uses a subset of the functionality
+#![allow(dead_code)]
+
 use dust_dds::infrastructure::type_support::DdsType;
 use serde::{Deserialize, Serialize};
 
