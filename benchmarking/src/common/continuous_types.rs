@@ -29,6 +29,8 @@ pub struct ContinuousBenchmarkConfig {
     pub metrics_sample_interval_ms: u64,
     /// Output file path for JSON results
     pub output_file: String,
+    /// Log file path for logging the start and end of the benchmark
+    pub log_file: Option<String>,
     /// Name/identifier for this benchmark run
     pub benchmark_name: String,
 }
@@ -42,6 +44,7 @@ impl Default for ContinuousBenchmarkConfig {
             payload_size: 1024,
             metrics_sample_interval_ms: 100,
             output_file: "continuous_benchmark_results.json".to_string(),
+            log_file: None,
             benchmark_name: "continuous_benchmark".to_string(),
         }
     }
@@ -410,6 +413,12 @@ pub fn parse_continuous_config_from_args() -> ContinuousBenchmarkConfig {
             "--help" | "-h" => {
                 print_continuous_help();
                 std::process::exit(0);
+            }
+            "--signal_file" | "-sf" => {
+                if i + 1 < args.len() {
+                    config.log_file = Some(args[i + 1].clone());
+                    i += 1;
+                }
             }
             _ => {}
         }

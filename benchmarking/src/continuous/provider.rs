@@ -9,9 +9,27 @@ use dust_dds::dds_async::domain_participant_factory::DomainParticipantFactoryAsy
 use dust_dds::std_runtime::StdRuntime;
 use mycellium_computing::core::application::Application;
 use mycellium_computing::provides;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+
+/// Append a log entry to the log file if configured
+fn append_to_log(log_file: &Option<String>, message: &str) {
+    if let Some(path) = log_file {
+        match OpenOptions::new().append(true).create(true).open(path) {
+            Ok(mut file) => {
+                if let Err(e) = writeln!(file, "{}", message) {
+                    eprintln!("[Provider] Failed to write to log file: {}", e);
+                }
+            }
+            Err(e) => {
+                eprintln!("[Provider] Failed to open log file: {}", e);
+            }
+        }
+    }
+}
 
 /// Provider implementation for continuous benchmarking
 /// The continuous handle will be used to publish data
@@ -206,6 +224,12 @@ async fn run_provider(config: ContinuousBenchmarkConfig) {
     let payload = generate_payload(config.payload_size);
     let payload_size = config.payload_size as u64;
 
+    // Log benchmark start
+    append_to_log(
+        &config.log_file,
+        &format!("\nSTART {}/s", config.target_pps),
+    );
+
     // Main benchmark loop - minimal overhead
     let mut sequence_id: u64 = 0;
     while benchmark_start.elapsed().as_secs() < config.duration_secs {
@@ -235,6 +259,9 @@ async fn run_provider(config: ContinuousBenchmarkConfig) {
         counters.add_bytes_sent(payload_size);
         counters.update_highest_sequence(sequence_id);
     }
+
+    // Log benchmark end
+    append_to_log(&config.log_file, &format!("\nEND {}/s", config.target_pps));
 
     // Stop progress reporting
     running.store(false, Ordering::SeqCst);

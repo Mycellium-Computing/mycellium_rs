@@ -11,11 +11,29 @@ use dust_dds::infrastructure::status::NO_STATUS;
 use dust_dds::listener::NO_LISTENER;
 use dust_dds::std_runtime::StdRuntime;
 use mycellium_computing::consumes;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::common::metrics_collector::{AtomicCounters, LatencyReservoir};
+
+/// Append a log entry to the log file if configured
+fn append_to_log(log_file: &Option<String>, message: &str) {
+    if let Some(path) = log_file {
+        match OpenOptions::new().append(true).create(true).open(path) {
+            Ok(mut file) => {
+                if let Err(e) = writeln!(file, "{}", message) {
+                    eprintln!("[Consumer] Failed to write to log file: {}", e);
+                }
+            }
+            Err(e) => {
+                eprintln!("[Consumer] Failed to open log file: {}", e);
+            }
+        }
+    }
+}
 
 /// Shared state for tracking sequence numbers (for out-of-order detection)
 /// Using atomics to avoid mutex contention in the hot path
@@ -144,6 +162,12 @@ async fn run_consumer(config: ContinuousBenchmarkConfig) {
         MetricsCollector::current_timestamp_ns()
     );
 
+    // Log benchmark start
+    append_to_log(
+        &config.log_file,
+        &format!("\nSTART {}/s", config.target_pps),
+    );
+
     // Progress reporting (separate from measurement to avoid interference)
     let running = Arc::new(AtomicBool::new(true));
     let progress_running = running.clone();
@@ -221,6 +245,9 @@ async fn run_consumer(config: ContinuousBenchmarkConfig) {
     let _ = metrics_handle.join();
 
     println!("\n[Consumer] Benchmark completed!");
+
+    // Log benchmark end
+    append_to_log(&config.log_file, &format!("\nEND {}/s", config.target_pps));
 
     // Compute and display aggregated metrics
     let metrics = AggregatedMetrics::from_collector(&metrics_collector);
