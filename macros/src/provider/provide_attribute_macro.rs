@@ -131,13 +131,13 @@ fn get_create_continuous_handle_impl_tokens(
     if continuous_funcs.is_empty() {
         // No continuous functionalities - return NoContinuousHandle
         return quote! {
-            type ContinuousHandle = mycellium_computing::core::application::provider::NoContinuousHandle;
+            type ContinuousHandle = mycelium_computing::core::application::provider::NoContinuousHandle;
 
             async fn create_continuous_handle(
                 _participant: &dust_dds::dds_async::domain_participant::DomainParticipantAsync<#runtime>,
                 _publisher: &dust_dds::dds_async::publisher::PublisherAsync<#runtime>,
             ) -> Self::ContinuousHandle {
-                mycellium_computing::core::application::provider::NoContinuousHandle
+                mycelium_computing::core::application::provider::NoContinuousHandle
             }
         };
     }
@@ -234,7 +234,7 @@ fn get_functionality_message_tokens(functionality: &Functionality) -> proc_macro
     let output_type = &functionality.output_type.to_token_stream().to_string();
 
     quote! {
-        mycellium_computing::core::messages::ProvidedFunctionality {
+        mycelium_computing::core::messages::ProvidedFunctionality {
             name: #name.to_string(),
             input_type: #input_type.to_string(),
             output_type: #output_type.to_string(),
@@ -257,7 +257,7 @@ fn get_functionalities_message_tokens(
     let provider_name = provider_name.to_string();
 
     tokens.extend(quote! {
-        mycellium_computing::core::messages::ProviderMessage {
+        mycelium_computing::core::messages::ProviderMessage {
             provider_name: #provider_name.to_string(),
             functionalities: vec![
                 #(#functionalities_messages),*
@@ -292,7 +292,7 @@ fn get_functionality_channel_tokens(
     let name_ident = &functionality.name;
     let input_type = if functionality.input_type.is_none() {
         quote::quote! {
-            mycellium_computing::core::messages::EmptyMessage
+            mycelium_computing::core::messages::EmptyMessage
         }
     } else {
         let provider_input_type = functionality.input_type.as_ref().unwrap();
@@ -303,7 +303,7 @@ fn get_functionality_channel_tokens(
     let output_type = &functionality.output_type;
 
     let topic_tokens = quote! {
-        let request_topic = participant.create_topic::<mycellium_computing::core::messages::ProviderExchange<#input_type>>(
+        let request_topic = participant.create_topic::<mycelium_computing::core::messages::ProviderExchange<#input_type>>(
             #topic_req_name,
             #request_topic_type_name,
             dust_dds::infrastructure::qos::QosKind::Default,
@@ -314,7 +314,7 @@ fn get_functionality_channel_tokens(
             .unwrap();
 
 
-        let response_topic = participant.create_topic::<mycellium_computing::core::messages::ProviderExchange<#output_type>>(
+        let response_topic = participant.create_topic::<mycelium_computing::core::messages::ProviderExchange<#output_type>>(
             #topic_res_name,
             #response_topic_type_name,
             dust_dds::infrastructure::qos::QosKind::Default,
@@ -337,7 +337,7 @@ fn get_functionality_channel_tokens(
     };
 
     let writer_tokens = quote! {
-        let writer = publisher.create_datawriter::<mycellium_computing::core::messages::ProviderExchange<#output_type>>(
+        let writer = publisher.create_datawriter::<mycelium_computing::core::messages::ProviderExchange<#output_type>>(
             &response_topic,
             dust_dds::infrastructure::qos::QosKind::Default,
             dust_dds::listener::NO_LISTENER,
@@ -348,12 +348,12 @@ fn get_functionality_channel_tokens(
     };
 
     let listener_tokens = quote! {
-        let listener = mycellium_computing::core::listener::RequestListener {
+        let listener = mycelium_computing::core::listener::RequestListener {
             writer,
-            implementation: Box::new(|request: mycellium_computing::core::messages::ProviderExchange<#input_type>| {
+            implementation: Box::new(|request: mycelium_computing::core::messages::ProviderExchange<#input_type>| {
                 Box::pin(async move {
                     let result = #method_call;
-                    mycellium_computing::core::messages::ProviderExchange {
+                    mycelium_computing::core::messages::ProviderExchange {
                         id: request.id,
                         payload: result,
                     }
@@ -366,7 +366,7 @@ fn get_functionality_channel_tokens(
         #listener_tokens
 
 
-        let reader = subscriber.create_datareader::<mycellium_computing::core::messages::ProviderExchange<#input_type>>(
+        let reader = subscriber.create_datareader::<mycelium_computing::core::messages::ProviderExchange<#input_type>>(
             &request_topic,
             dust_dds::infrastructure::qos::QosKind::Default,
             Some(listener),
@@ -429,10 +429,10 @@ fn get_provider_impl_tokens(
     let runtime = &functionalities.runtime;
 
     quote::quote! {
-        impl mycellium_computing::core::application::provider::ProviderTrait<#runtime> for #provider_name {
+        impl mycelium_computing::core::application::provider::ProviderTrait<#runtime> for #provider_name {
             #continuous_handle_impl
 
-            fn get_functionalities() -> mycellium_computing::core::messages::ProviderMessage {
+            fn get_functionalities() -> mycelium_computing::core::messages::ProviderMessage {
                 #message_tokens
             }
 
@@ -441,7 +441,7 @@ fn get_provider_impl_tokens(
                 participant: &dust_dds::dds_async::domain_participant::DomainParticipantAsync<#runtime>,
                 publisher: &dust_dds::dds_async::publisher::PublisherAsync<#runtime>,
                 subscriber: &dust_dds::dds_async::subscriber::SubscriberAsync<#runtime>,
-                storage: &mut mycellium_computing::utils::storage::ExecutionObjects,
+                storage: &mut mycelium_computing::utils::storage::ExecutionObjects,
             ) {
                 #channel_tokens
             }

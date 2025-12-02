@@ -5,8 +5,8 @@ use common::metrics_collector::{AggregatedMetrics, MetricsCollector, MetricsColl
 use common::types::{BenchmarkConfig, BenchmarkRequest, BenchmarkResponse, parse_config_from_args};
 use dust_dds::dds_async::domain_participant_factory::DomainParticipantFactoryAsync;
 use dust_dds::std_runtime::StdRuntime;
-use mycellium_computing::core::application::Application;
-use mycellium_computing::provides;
+use mycelium_computing::core::application::Application;
+use mycelium_computing::provides;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};

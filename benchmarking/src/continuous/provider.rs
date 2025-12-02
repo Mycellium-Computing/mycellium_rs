@@ -7,8 +7,8 @@ use common::continuous_types::{
 use common::metrics_collector::{AggregatedMetrics, MetricsCollector, MetricsCollectorConfig};
 use dust_dds::dds_async::domain_participant_factory::DomainParticipantFactoryAsync;
 use dust_dds::std_runtime::StdRuntime;
-use mycellium_computing::core::application::Application;
-use mycellium_computing::provides;
+use mycelium_computing::core::application::Application;
+use mycelium_computing::provides;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::Arc;

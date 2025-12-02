@@ -23,7 +23,7 @@ fn get_functionalities_readers_attributes(
                 FunctionalityKind::RequestResponse | FunctionalityKind::Response => {
                     let reader_ident = format_ident!("{}_reader", name.to_string().to_lowercase());
                     Some(quote! {
-                        #reader_ident: dust_dds::dds_async::data_reader::DataReaderAsync<#runtime, mycellium_computing::core::messages::ProviderExchange<#output_type>>
+                        #reader_ident: dust_dds::dds_async::data_reader::DataReaderAsync<#runtime, mycelium_computing::core::messages::ProviderExchange<#output_type>>
                     })
                 }
             }
@@ -47,13 +47,13 @@ fn get_functionalities_writers_attributes(
                     let writer_ident = format_ident!("{}_writer", name.to_string().to_lowercase());
                     let input_type = functionality.input_type.as_ref().unwrap();
                     Some(quote! {
-                        #writer_ident: dust_dds::dds_async::data_writer::DataWriterAsync<#runtime, mycellium_computing::core::messages::ProviderExchange<#input_type>>
+                        #writer_ident: dust_dds::dds_async::data_writer::DataWriterAsync<#runtime, mycelium_computing::core::messages::ProviderExchange<#input_type>>
                     })
                 }
                 FunctionalityKind::Response => {
                     let writer_ident = format_ident!("{}_writer", name.to_string().to_lowercase());
                     Some(quote! {
-                        #writer_ident: dust_dds::dds_async::data_writer::DataWriterAsync<#runtime, mycellium_computing::core::messages::ProviderExchange<mycellium_computing::core::messages::EmptyMessage>>
+                        #writer_ident: dust_dds::dds_async::data_writer::DataWriterAsync<#runtime, mycelium_computing::core::messages::ProviderExchange<mycelium_computing::core::messages::EmptyMessage>>
                     })
                 }
             }
@@ -102,7 +102,7 @@ fn generate_request_response_topics(
     let res_topic_var_ident = format_ident!("{}_res_topic", name.to_string().to_lowercase());
 
     quote! {
-        let #req_topic_var_ident = participant.create_topic::<mycellium_computing::core::messages::ProviderExchange<#request_payload_type>>(
+        let #req_topic_var_ident = participant.create_topic::<mycelium_computing::core::messages::ProviderExchange<#request_payload_type>>(
             #topic_req_name,
             #topic_req_type_name,
             dust_dds::infrastructure::qos::QosKind::Default,
@@ -112,7 +112,7 @@ fn generate_request_response_topics(
         .await
         .unwrap();
 
-        let #res_topic_var_ident = participant.create_topic::<mycellium_computing::core::messages::ProviderExchange<#output_type>>(
+        let #res_topic_var_ident = participant.create_topic::<mycelium_computing::core::messages::ProviderExchange<#output_type>>(
             #topic_res_name,
             #topic_res_type_name,
             dust_dds::infrastructure::qos::QosKind::Default,
@@ -155,7 +155,7 @@ fn get_functionalities_topics_instantiations(
                 FunctionalityKind::Response => generate_request_response_topics(
                     name,
                     output_type,
-                    quote!(mycellium_computing::core::messages::EmptyMessage),
+                    quote!(mycelium_computing::core::messages::EmptyMessage),
                     functionality.input_type.as_ref(),
                 ),
             }
@@ -337,7 +337,7 @@ fn generate_response_wait_logic(
     quote! {
         let (sender, receiver) = #runtime::oneshot::<#output_type>();
 
-        let listener = mycellium_computing::core::listener::ProviderResponseListener {
+        let listener = mycelium_computing::core::listener::ProviderResponseListener {
             expected_id: request.id,
             response_sender: Some(sender),
         };
@@ -354,16 +354,16 @@ fn generate_response_wait_logic(
 
         let data_future = async { receiver.await.ok() }.fuse();
 
-        let timer_future = mycellium_computing::futures_timer::Delay::new(core::time::Duration::new(
+        let timer_future = mycelium_computing::futures_timer::Delay::new(core::time::Duration::new(
             timeout.sec() as u64,
             timeout.nanosec(),
         ))
         .fuse();
 
-        mycellium_computing::futures::pin_mut!(data_future);
-        mycellium_computing::futures::pin_mut!(timer_future);
+        mycelium_computing::futures::pin_mut!(data_future);
+        mycelium_computing::futures::pin_mut!(timer_future);
 
-        mycellium_computing::futures::select! {
+        mycelium_computing::futures::select! {
             res = data_future => res,
             _ = timer_future => None,
         }
@@ -387,10 +387,10 @@ fn generate_request_response_method(
             timeout: dust_dds::infrastructure::time::Duration,
         ) -> Option<#output_type> {
             use dust_dds::runtime::DdsRuntime;
-            use mycellium_computing::futures::FutureExt;
+            use mycelium_computing::futures::FutureExt;
 
-            let request = mycellium_computing::core::messages::ProviderExchange {
-                id: mycellium_computing::utils::next_request_id(),
+            let request = mycelium_computing::core::messages::ProviderExchange {
+                id: mycelium_computing::utils::next_request_id(),
                 payload: data,
             };
 
@@ -414,11 +414,11 @@ fn generate_response_method(
             timeout: dust_dds::infrastructure::time::Duration,
         ) -> Option<#output_type> {
             use dust_dds::runtime::DdsRuntime;
-            use mycellium_computing::futures::FutureExt;
+            use mycelium_computing::futures::FutureExt;
 
-            let request = mycellium_computing::core::messages::ProviderExchange {
-                id: mycellium_computing::utils::next_request_id(),
-                payload: mycellium_computing::core::messages::EmptyMessage,
+            let request = mycelium_computing::core::messages::ProviderExchange {
+                id: mycelium_computing::utils::next_request_id(),
+                payload: mycelium_computing::core::messages::EmptyMessage,
             };
 
             #wait_logic
@@ -514,12 +514,12 @@ fn get_init_body_writers(funtionalities: &Functionalities) -> Vec<proc_macro2::T
                     let t = f.input_type.as_ref().unwrap();
                     quote!(#t)
                 } else {
-                    quote!(mycellium_computing::core::messages::EmptyMessage)
+                    quote!(mycelium_computing::core::messages::EmptyMessage)
                 };
 
                 Some(quote! {
                     let #writer_ident = publisher
-                        .create_datawriter::<mycellium_computing::core::messages::ProviderExchange<#input_type>>(
+                        .create_datawriter::<mycelium_computing::core::messages::ProviderExchange<#input_type>>(
                             &#req_topic_var_ident,
                             dust_dds::infrastructure::qos::QosKind::Default,
                             dust_dds::listener::NO_LISTENER,
@@ -547,7 +547,7 @@ fn get_init_body_readers(functionalities: &Functionalities) -> Vec<proc_macro2::
 
                 Some(quote! {
                     let #reader_ident = subscriber
-                        .create_datareader::<mycellium_computing::core::messages::ProviderExchange<#output_type>>(
+                        .create_datareader::<mycelium_computing::core::messages::ProviderExchange<#output_type>>(
                             &#res_topic_var_ident,
                             dust_dds::infrastructure::qos::QosKind::Default,
                             dust_dds::listener::NO_LISTENER,

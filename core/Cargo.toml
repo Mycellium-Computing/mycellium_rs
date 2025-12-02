@@ -1,5 +1,5 @@
 [package]
-name = "mycellium_computing"
+name = "mycelium_computing"
 version = "0.1.0"
 edition = "2024"
 
@@ -8,4 +8,4 @@ dust_dds = "0.13.0"
 futures = "0.3.31"
 futures-timer = "3.0.3"
 futures-channel = "0.3.31"
-mycellium_computing_macros = { path = "../macros" }
+mycelium_computing_macros = { path = "../macros" }

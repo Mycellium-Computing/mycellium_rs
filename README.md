@@ -1,10 +1,10 @@
-# Mycellium Computing
+# Mycelium Computing
 
 A Rust framework for building modular, distributed applications using DDS (Data Distribution Service) middleware. This framework simplifies the creation of provider-consumer communication patterns through intuitive procedural macros.
 
 ## Overview
 
-Mycellium Computing enables developers to create distributed systems with minimal boilerplate by leveraging Rust's procedural macro system. It abstracts the complexity of DDS-based communication, allowing you to focus on your application logic.
+Mycelium Computing enables developers to create distributed systems with minimal boilerplate by leveraging Rust's procedural macro system. It abstracts the complexity of DDS-based communication, allowing you to focus on your application logic.
 
 ### Key Features
 
@@ -21,7 +21,7 @@ Mycellium Computing enables developers to create distributed systems with minima
 
 ```
 modular_architecture/
-├── core/                    # Main library (mycellium_computing)
+├── core/                    # Main library (mycelium_computing)
 │   └── src/
 │       ├── core/           # Application, listeners, and messages
 │       └── utils/          # Utilities (ID generator, storage)
@@ -41,7 +41,7 @@ Add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-mycellium_computing = { path = "path/to/core" }
+mycelium_computing = { path = "path/to/core" }
 dust_dds = "0.13.0"
 ```
 
@@ -71,7 +71,7 @@ pub struct Number {
 Use the `#[provides]` macro to define a service provider:
 
 ```rust
-use mycellium_computing::provides;
+use mycelium_computing::provides;
 use dust_dds::std_runtime::StdRuntime;
 
 #[provides(StdRuntime, [
@@ -95,7 +95,7 @@ impl CalculatorProviderProviderTrait for CalculatorProvider {
 Use the `#[consumes]` macro to define a service consumer:
 
 ```rust
-use mycellium_computing::consumes;
+use mycelium_computing::consumes;
 
 #[consumes(StdRuntime, [
     RequestResponse("add_two_ints", ArithmeticRequest, Number),
@@ -117,7 +117,7 @@ impl CalculatorConsumerContinuosTrait for CalculatorConsumer {
 
 ```rust
 use dust_dds::dds_async::domain_participant_factory::DomainParticipantFactoryAsync;
-use mycellium_computing::core::application::Application;
+use mycelium_computing::core::application::Application;
 
 async fn run_provider() {
     let factory = DomainParticipantFactoryAsync::get_instance();

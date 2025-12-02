@@ -10,6 +10,6 @@ pub mod futures_timer {
 
 pub mod core;
 pub mod utils;
-pub use mycellium_computing_macros::*;
+pub use mycelium_computing_macros::*;
 
-extern crate self as mycellium_computing;
+extern crate self as mycelium_computing;

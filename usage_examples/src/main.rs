@@ -2,8 +2,8 @@ mod example_messages;
 
 use crate::example_messages::face_recognition::*;
 use dust_dds::dds_async::domain_participant_factory::DomainParticipantFactoryAsync;
-use mycellium_computing::core::application::Application;
-use mycellium_computing::{consumes, provides};
+use mycelium_computing::core::application::Application;
+use mycelium_computing::{consumes, provides};
 use std::env;
 // Import the desired DUST DDS runtime. By default, DUST DDS provides a standard implementation.
 // The DUST DDS standard runtime depends on the std library. Then is not compatible with no_std.

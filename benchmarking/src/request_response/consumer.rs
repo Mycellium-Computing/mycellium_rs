@@ -8,7 +8,7 @@ use dust_dds::infrastructure::qos::QosKind;
 use dust_dds::infrastructure::status::NO_STATUS;
 use dust_dds::listener::NO_LISTENER;
 use dust_dds::std_runtime::StdRuntime;
-use mycellium_computing::consumes;
+use mycelium_computing::consumes;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};

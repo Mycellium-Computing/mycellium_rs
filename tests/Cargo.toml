@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dev-dependencies]
-mycellium_computing = { path = "../core" }
+mycelium_computing = { path = "../core" }
 dust_dds = "0.13.0"
 futures = "0.3.31"
 futures-timer = "3.0.3"
